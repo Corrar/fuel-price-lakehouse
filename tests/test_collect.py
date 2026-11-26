@@ -11,6 +11,8 @@ import pyarrow.parquet as pq
 import pytest
 
 from fuel_price_lakehouse import cli
+from fuel_price_lakehouse.collect import landing
+from fuel_price_lakehouse.collect.run import rebuild_raw
 from fuel_price_lakehouse.collect.run import run as collect
 from fuel_price_lakehouse.layout import manifest_path
 
@@ -265,6 +267,25 @@ def test_file_in_windows_1252_is_read_and_the_encoding_recorded(web, tmp_path, f
     assert manifest(tmp_path)[OCTOBER_DIESEL]["details"]["encoding"] == "utf-8"
 
 
+def test_bom_file_with_invalid_utf8_is_corrupt_not_read_as_another_encoding(web, tmp_path, fast):
+    web.files[OCTOBER_LPG] = anp_csv("110,00").replace(b"SAO PAULO", b"S\xc3O PAULO")
+    outcomes = run(web, tmp_path, fast)
+
+    assert actions(outcomes)[OCTOBER_LPG] == "failed"
+    assert "not a readable CSV" in manifest(tmp_path)[OCTOBER_LPG]["last_error"]
+
+
+def test_unclosed_quote_fails_the_file_instead_of_merging_rows(web, tmp_path, fast):
+    good = anp_csv("110,00", "111,00", "112,00").decode("utf-8")
+    web.files[OCTOBER_LPG] = good.replace("POSTO 1 LTDA", 'POSTO "1 LTDA', 1).encode("utf-8")
+    web.files[OCTOBER_LPG] = web.files[OCTOBER_LPG].replace(b';POSTO "1', b';"POSTO 1', 1)
+    outcomes = run(web, tmp_path, fast)
+
+    assert actions(outcomes)[OCTOBER_LPG] == "failed"
+    assert "unbalanced quote" in manifest(tmp_path)[OCTOBER_LPG]["last_error"]
+    assert not list(tmp_path.rglob("fuel_group=lpg/**/*.parquet"))
+
+
 def test_malformed_quoting_falls_back_to_the_lenient_reader(web, tmp_path, fast):
     # A quote closed in the middle of a field is an error for the strict reader.
     bad = '"AV "BRASIL" 100"'
@@ -333,6 +354,59 @@ def test_full_check_downloads_again_but_rewrites_nothing(web, tmp_path, fast):
     assert set(actions(outcomes).values()) == {"unchanged"}
     assert len(web.downloads()) == 4
     assert snapshot(tmp_path) == before
+
+
+# --- landing zone --------------------------------------------------------------------------------
+
+
+def test_downloaded_bytes_are_kept_and_match_the_recorded_hash(web, tmp_path, fast):
+    run(web, tmp_path, fast, since=date(2026, 1, 1))
+
+    for url in (OCTOBER_DIESEL, SEMESTER_ZIP):  # a CSV (compressed) and a ZIP (kept as is)
+        record = manifest(tmp_path)[url]
+        landed = tmp_path / record["landing_path"]
+        assert landed.name.startswith(record["sha256"])
+        assert landing.sha256_of(landed) == record["sha256"]
+    assert (tmp_path / manifest(tmp_path)[SEMESTER_ZIP]["landing_path"]).read_bytes() == (
+        web.files[SEMESTER_ZIP]
+    )
+    sgs = manifest(tmp_path)["bcb_sgs/1/2026"]
+    assert landing.sha256_of(tmp_path / sgs["landing_path"]) == sgs["sha256"]
+
+
+def test_republication_lands_next_to_the_version_it_replaces(web, tmp_path, fast):
+    run(web, tmp_path, fast)
+    first = manifest(tmp_path)[OCTOBER_DIESEL]
+    web.files[OCTOBER_DIESEL] = anp_csv("6,01", "6,02", "6,03")
+    run(web, tmp_path, fast)
+
+    second = manifest(tmp_path)[OCTOBER_DIESEL]
+    assert second["landing_path"] != first["landing_path"]
+    assert second["superseded"][0]["landing_path"] == first["landing_path"]
+    assert landing.sha256_of(tmp_path / first["landing_path"]) == first["sha256"]  # still there
+
+
+def test_raw_layer_can_be_rebuilt_from_landing_without_the_network(web, tmp_path, fast):
+    run(web, tmp_path, fast)
+    records = manifest(tmp_path)
+    raw = tmp_path / records[OCTOBER_DIESEL]["raw_path"]
+    before = pq.read_table(raw)
+    for record in records.values():
+        if record["raw_path"]:
+            (tmp_path / record["raw_path"]).unlink()
+    web.requests.clear()
+
+    outcomes = rebuild_raw(tmp_path)
+
+    assert {outcome.action for outcome in outcomes} == {"rebuilt"}
+    assert web.requests == []
+    assert pq.read_table(raw).equals(before)  # same rows, same provenance columns
+    assert manifest(tmp_path) == records
+
+
+def test_empty_sgs_window_lands_nothing(web, tmp_path, fast):
+    run(web, tmp_path, fast, since=date(2025, 1, 1), sources=["bcb_sgs"])
+    assert manifest(tmp_path)["bcb_sgs/433/2025"]["landing_path"] is None
 
 
 # --- Banco Central SGS -------------------------------------------------------------------------

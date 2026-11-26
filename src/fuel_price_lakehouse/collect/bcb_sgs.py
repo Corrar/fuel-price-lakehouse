@@ -22,6 +22,7 @@ from pathlib import Path
 
 import httpx
 
+from fuel_price_lakehouse.collect import landing
 from fuel_price_lakehouse.collect.http import Fetcher, SourceError, TransientError
 from fuel_price_lakehouse.collect.manifest import FileRecord, Manifest, Outcome
 from fuel_price_lakehouse.collect.raw import CorruptFileError, Provenance, write_json_records
@@ -189,6 +190,12 @@ def _collect_window(
         raise SourceError(f"{window.url}: had {previous.rows} rows, now reports no data")
 
     collected_at = now()
+    # Only what the API really sent is landed: the "[]" of an empty window is ours.
+    landed = (
+        landing.store_bytes(body, sha256, Source.BCB_SGS, root)
+        if response.status_code == 200
+        else None
+    )
     destination = raw_path(window, root)
     rows = write_json_records(body, destination, Provenance(window.url, sha256, collected_at))
     if rows == 0:
@@ -204,6 +211,7 @@ def _collect_window(
             sha256=sha256,
             rows=rows,
             raw_path=destination.relative_to(root).as_posix() if rows else None,
+            landing_path=landed.relative_to(root).as_posix() if landed else None,
             revision=(record.revision if record else 0) + 1,
             details={"series": str(window.code), "year": str(window.start.year), "etag": new_etag},
             superseded=previous.history_with_current() if previous is not None else [],

@@ -1,6 +1,6 @@
 # 0002 — What is published, and where the state of a run lives
 
-- Status: accepted
+- Status: accepted; put into code by stages 3 to 5 (curated tables, dashboard, schedule)
 - Date: 2026-11-26
 - Supersedes part of [0001](0001-storage-between-runs.md)
 
@@ -31,7 +31,7 @@ staged and curated station-level tables therefore cannot live in a release.
 | Aggregate tables (`agg_*`), exchange rate and IPCA tables, as Parquet | Yes | Assets of the `data-latest` release |
 | Collection manifest: URL, size and SHA-256 of every source file ingested | Yes | Asset of the `data-latest` release |
 | Quality history: one line of counts per run | Yes | Asset of the `data-latest` release |
-| Raw, staged and quarantine layers; station-level curated tables | **No** | Stay on the runner |
+| Landing, raw, staged and quarantine layers; station-level curated tables | **No** | Stay on the runner |
 
 Guard rails, enforced in code rather than by convention:
 
@@ -79,12 +79,13 @@ the replaced version noted in the manifest (`superseded`).
 - Anyone can verify the published aggregates: the manifest lists the exact
   source files (with hashes) and the code is in this repository.
 - The station-level tables exist only where the pipeline runs. To explore
-  them, clone the repository and run `make pipeline`.
-- The raw layer keeps the current content of each source file as a Parquet
-  copy, not the original bytes, and a republication replaces it. The SHA-256
-  in the manifest is of the downloaded bytes; it can be checked against the
-  source, not against the Parquet file. Keeping every original file would
-  need about 5 GB for the full history, which no free storage option here
-  holds privately.
+  them, clone the repository and run the pipeline locally.
+- Every downloaded file is kept byte for byte in a landing zone, addressed by
+  its SHA-256 and compressed (ZIP files as they came, the rest with zstd). The
+  hash in the manifest can be checked again at any time, the raw Parquet copy
+  can be rebuilt without the network when the way files are read changes
+  (`fuel-lakehouse extract --rebuild-raw`), and a republished file lands next
+  to the version it replaces instead of over it. The price is disk: the landing
+  zone grows by about one set of rolling four-week files per week.
 - If ANP declares an open licence for the dataset, publishing the station-level
   tables is a change to the whitelist, not to the design.

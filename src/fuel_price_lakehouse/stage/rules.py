@@ -75,8 +75,9 @@ class Evaluation:
 def evaluate(rules: Sequence[Rule], frame: pd.DataFrame, context: FileContext) -> Evaluation:
     """Apply every rule to ``frame``.
 
-    A rule that returns something other than one boolean per row is a bug in
-    the rule, not bad data, and raises.
+    A rule that returns something other than one boolean per row, in the row
+    order of the frame, is a bug in the rule, not bad data, and raises: results
+    are matched to rows by position.
     """
     ids = [rule.id for rule in rules]
     if len(set(ids)) != len(ids):
@@ -85,8 +86,11 @@ def evaluate(rules: Sequence[Rule], frame: pd.DataFrame, context: FileContext) -
     failed: dict[Severity, dict[str, np.ndarray]] = {Severity.ERROR: {}, Severity.WARNING: {}}
     for rule in rules:
         passed = rule.check(frame, context)
-        if len(passed) != len(frame) or passed.dtype != bool:
-            raise TypeError(f"rule {rule.id!r} must return one bool per row, got {passed.dtype}")
+        if passed.dtype != bool or not passed.index.equals(frame.index):
+            raise TypeError(
+                f"rule {rule.id!r} must return one bool per row, aligned with the frame "
+                f"(got dtype {passed.dtype}, {len(passed)} values for {len(frame)} rows)"
+            )
         failed[rule.severity][rule.id] = ~passed.to_numpy()
 
     return Evaluation(

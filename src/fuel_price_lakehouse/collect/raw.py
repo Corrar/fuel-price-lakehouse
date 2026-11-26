@@ -28,10 +28,11 @@ import pyarrow.parquet as pq
 
 _BATCH_ROWS = 50_000
 
-# ANP files are ";"-separated, quoted only where needed, and UTF-8 with BOM,
-# except for a few that are Windows-1252. Encodings are tried in this order.
-_ANP_ENCODINGS = ("utf-8-sig", "cp1252")
-_ENCODING_NAMES = {"utf-8-sig": "utf-8", "cp1252": "cp1252"}
+# ANP files are ";"-separated and quoted only where needed. Nearly all are
+# UTF-8 with a BOM; a few have no BOM and are Windows-1252.
+_UTF8_BOM = b"\xef\xbb\xbf"
+_ZIP_MAGIC = b"PK\x03\x04"
+_ENCODING_NAMES = {"utf-8-sig": "utf-8", "utf-8": "utf-8", "cp1252": "cp1252"}
 _ANP_DELIMITER = ";"
 
 
@@ -73,16 +74,21 @@ def write_anp_csv(downloaded: Path, destination: Path, provenance: Provenance) -
     Two things vary between files and are handled here rather than failing the
     whole file, because one odd file must not stop twenty years of history:
 
-    - encoding: UTF-8 is tried first; a file that is not valid UTF-8 (the
-      second semester of 2021 is one) is read as Windows-1252;
+    - encoding: a UTF-8 BOM settles it. Without one, UTF-8 is tried first and
+      Windows-1252 second (the second semester of 2021 is such a file). A file
+      that announces UTF-8 with a BOM and then is not valid UTF-8 is corrupt:
+      reading it as something else would turn its accents into noise.
     - quoting: the strict CSV reader is tried first; if a file has malformed
       quoting the lenient reader is used, and any row it splits into the wrong
-      number of fields is visible through ``_field_count``.
+      number of fields is visible through ``_field_count``. The lenient reader
+      is not allowed to swallow line breaks into a field, which is how an
+      unclosed quote silently merges rows; that fails the file instead.
 
     Which path was taken is returned, and ends up in the manifest.
     """
+    encodings = ("utf-8-sig",) if _starts_with_bom(downloaded) else ("utf-8", "cp1252")
     failure: Exception | None = None
-    for encoding in _ANP_ENCODINGS:
+    for encoding in encodings:
         try:
             for strict in (True, False):
                 try:
@@ -96,18 +102,34 @@ def write_anp_csv(downloaded: Path, destination: Path, provenance: Provenance) -
     raise CorruptFileError(f"{downloaded.name}: not a readable CSV: {failure}") from failure
 
 
+def _starts_with_bom(downloaded: Path) -> bool:
+    with _open_csv_bytes(downloaded) as stream:
+        return stream.read(len(_UTF8_BOM)) == _UTF8_BOM
+
+
 def _copy_csv(
     downloaded: Path, destination: Path, provenance: Provenance, encoding: str, strict: bool
 ) -> int:
     with _open_csv_bytes(downloaded) as stream:
         text = io.TextIOWrapper(stream, encoding=encoding, newline="")
-        reader = csv.reader(text, delimiter=_ANP_DELIMITER, strict=strict)
+        reader: Iterator[list[str]] = csv.reader(text, delimiter=_ANP_DELIMITER, strict=strict)
+        if not strict:
+            reader = _without_merged_lines(reader, downloaded)
         header = _checked_header(next(reader, None), downloaded)
         schema = _schema(
             header,
             [pa.field("_field_count", pa.int32()), pa.field("_extra_fields", pa.string())],
         )
         return _write(destination, schema, _anp_batches(reader, header), provenance)
+
+
+def _without_merged_lines(rows: Iterator[list[str]], path: Path) -> Iterator[list[str]]:
+    for number, row in enumerate(rows, start=1):
+        if any("\n" in value or "\r" in value for value in row):
+            raise CorruptFileError(
+                f"{path.name}: unbalanced quote near record {number}: lines would be merged"
+            )
+        yield row
 
 
 def write_json_records(body: bytes, destination: Path, provenance: Provenance) -> int:
@@ -141,6 +163,9 @@ def _as_text(value: object) -> str | None:
 def _open_csv_bytes(path: Path) -> Iterator[IO[bytes]]:
     if not zipfile.is_zipfile(path):
         with path.open("rb") as stream:
+            if stream.read(len(_ZIP_MAGIC)) == _ZIP_MAGIC:
+                raise CorruptFileError(f"{path.name}: damaged ZIP")
+            stream.seek(0)
             yield stream
         return
     try:

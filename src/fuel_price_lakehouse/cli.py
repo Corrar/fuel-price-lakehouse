@@ -59,6 +59,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="download everything again and compare hashes",
     )
     extract.add_argument(
+        "--rebuild-raw",
+        action="store_true",
+        help="recreate the raw layer from the landed files, without the network",
+    )
+    extract.add_argument(
         "--pause",
         type=float,
         default=1.0,
@@ -71,7 +76,14 @@ def build_parser() -> argparse.ArgumentParser:
 
 def _extract(args: argparse.Namespace) -> int:
     from fuel_price_lakehouse.collect.http import default_client
-    from fuel_price_lakehouse.collect.run import SOURCES, run
+    from fuel_price_lakehouse.collect.run import SOURCES, rebuild_raw, run
+
+    if args.rebuild_raw:
+        rebuilt = Counter(outcome.action for outcome in rebuild_raw(args.root))
+        logger.info(
+            "extract: %s", ", ".join(f"{n} {action}" for action, n in sorted(rebuilt.items()))
+        )
+        return 1 if rebuilt["failed"] else 0
 
     with default_client() as client:
         outcomes = run(

@@ -137,7 +137,7 @@ monthly and four-week files.
 | Encoding | UTF-8 **with BOM**. One exception found so far: `dsas/ca/ca-2021-02.csv` is Windows-1252 without BOM (found when the history since 2020 was collected; the 15 files sampled before it were all UTF-8). |
 | Separator | `;` |
 | Line ending | CRLF |
-| Quoting | Only when a field contains `;` or `"`; inner quotes are doubled |
+| Quoting | Only when a field contains `;`, `"` or a tab; inner quotes are doubled |
 | Dates | `dd/mm/yyyy` |
 | Decimal separator | Comma |
 | Missing value | Empty string |
@@ -179,10 +179,10 @@ Counts refer to the file named. Three files were read in full: `ca-2026-01`
 | Problem | Evidence |
 | --- | --- |
 | **Naive `;` splitting breaks rows** | 5,645 rows in `ca-2026-01` and 609 in the four-week file contain a quoted `;`, for example an address complement written as `"LOTE: 04;"`. With a quote-aware parser every row has 16 fields. |
-| **Leading space in every CNPJ** | Every row in every sample (`; 01.492.748/0003-83;`). After trimming, all masks and check digits are valid. |
+| **CNPJ written two ways** | The samples all have a leading space and the mask (`; 01.492.748/0003-83;`). The two 2025-S2 semester files, read later, have 14 bare digits. After reducing to digits, all masks and check digits are valid. |
 | **Decimal comma, and integers without separator** | Every price uses a comma. In `glp-2004-01`, 39,955 rows hold a bare integer price such as `30`. |
 | **Purchase price empty** | 422,418 of 422,418 rows in `ca-2026-01`; 31,089 of 45,925 in `glp-2004-01`. |
-| **Exact duplicate rows** | 6 in `ca-2026-01`, none in the other samples. No duplicated (CNPJ, product, date) key had conflicting prices. |
+| **Exact duplicate rows** | 6 in `ca-2026-01`, none in the other samples. No duplicated (CNPJ, product, date) key had conflicting prices in the samples; the full history since 2020 has 4 such keys, all in `ca-2024-01` (section 1.8). |
 | **Republished rows** | The four-week file overlaps the monthly file: all 6,099 rows sampled from the end of the October 2026 monthly file (27–30/10/2026) also exist in the four-week file. 6,097 are byte-identical; 2 differ only in the station's name. |
 | **Station name drift** | The same CNPJ on the same date appears as `… LTDA` in one file and `… LTDA - EPP` in the other. Names are not a stable key; the CNPJ is. |
 | **Stray whitespace** | Leading or trailing spaces in non-CNPJ fields in 2,162 rows of `ca-2026-01` and 28,674 of `glp-2004-01`. Runs of repeated spaces inside a field in 40,020 rows of `ca-2026-01`. One 2004 row has a tab inside a field. |

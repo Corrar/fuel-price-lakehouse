@@ -19,6 +19,9 @@ _SAFE_VALUE = re.compile(r"[A-Za-z0-9._-]+")
 class Layer(StrEnum):
     """Pipeline layers, in the order data flows through them."""
 
+    LANDING = "landing"
+    """Downloaded files, byte for byte, addressed by the hash of their content."""
+
     RAW = "raw"
     """A faithful copy of each downloaded file: every value as text, never modified."""
 
@@ -39,9 +42,9 @@ class Source(StrEnum):
     BCB_SGS = "bcb_sgs"
 
 
-def layer_dir(layer: Layer, source: Source, root: Path = DEFAULT_DATA_ROOT) -> Path:
+def layer_dir(layer: Layer, source: str, root: Path = DEFAULT_DATA_ROOT) -> Path:
     """Directory holding everything from ``source`` at ``layer``."""
-    return root / layer.value / source.value
+    return root / layer.value / Source(source).value
 
 
 def manifest_path(root: Path = DEFAULT_DATA_ROOT) -> Path:

@@ -24,6 +24,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import urljoin
 
+from fuel_price_lakehouse.collect import landing
 from fuel_price_lakehouse.collect.http import Fetcher, SourceError, TransientError
 from fuel_price_lakehouse.collect.manifest import FileRecord, Manifest, Outcome
 from fuel_price_lakehouse.collect.raw import CorruptFileError, Provenance, write_anp_csv
@@ -228,6 +229,7 @@ def _collect_file(
             previous.details = {**previous.details, **file.details}
             return Outcome(file.url, "unchanged", download.size_bytes, detail="same hash")
         collected_at = now()
+        landed = landing.store_file(downloaded, download.sha256, Source.ANP, root)
         destination = raw_path(file, root)
         copy = write_anp_csv(
             downloaded, destination, Provenance(file.url, download.sha256, collected_at)
@@ -246,6 +248,7 @@ def _collect_file(
             sha256=download.sha256,
             rows=copy.rows,
             raw_path=destination.relative_to(root).as_posix(),
+            landing_path=landed.relative_to(root).as_posix(),
             revision=(record.revision if record else 0) + 1,
             details={
                 **file.details,

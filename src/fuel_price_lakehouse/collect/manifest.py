@@ -36,14 +36,17 @@ class FileRecord:
     rows: int | None = None
     raw_path: str | None = None
     """Raw Parquet file, relative to the data root. ``None`` when there are no rows."""
+    landing_path: str | None = None
+    """The downloaded bytes in the landing zone, relative to the data root."""
     revision: int = 0
     """How many different contents were ingested from this URL. Above 1: republished."""
     details: dict[str, str] = field(default_factory=dict)
     """Source-specific attributes (period, fuel group, ETag, ...)."""
     superseded: list[dict[str, str | int | None]] = field(default_factory=list)
-    """Earlier contents of this URL, oldest first: SHA-256, size, rows and when
-    each was collected. The raw file holds only the current content; this is
-    the audit trail of what the source republished."""
+    """Earlier contents of this URL, oldest first: SHA-256, size, rows, when
+    each was collected and where its bytes are in the landing zone. The raw
+    file holds only the current content; this is the audit trail of what the
+    source republished."""
     last_error: str | None = None
     """Latest failure. A record can be ``ok`` and carry an error: the previous
     content is still valid and the next run tries the new one again."""
@@ -62,6 +65,7 @@ class FileRecord:
             "size_bytes": self.size_bytes,
             "rows": self.rows,
             "collected_at": self.collected_at,
+            "landing_path": self.landing_path,
         }
         return [*self.superseded, current]
 

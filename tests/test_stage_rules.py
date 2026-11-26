@@ -62,3 +62,10 @@ def test_rule_returning_non_boolean_is_a_bug():
     broken = Rule("broken", Severity.ERROR, "d", "d", lambda f, _c: f["a"])
     with pytest.raises(TypeError, match="broken"):
         evaluate([broken], frame, CONTEXT)
+
+
+def test_rule_returning_rows_in_another_order_is_a_bug():
+    frame = pd.DataFrame({"a": [1, -1]})
+    shuffled = Rule("shuffled", Severity.ERROR, "d", "d", lambda f, _c: (f["a"] > 0).iloc[::-1])
+    with pytest.raises(TypeError, match="aligned"):
+        evaluate([shuffled], frame, CONTEXT)
