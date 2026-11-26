@@ -67,6 +67,12 @@ make format    # auto-fix and format
 This project is not affiliated with ANP or Banco Central do Brasil. See
 [`docs/sources.md`](docs/sources.md) for the terms of use of each source.
 
+## License
+
+The code is released under the [MIT License](LICENSE). The data belongs to its
+publishers and is subject to their own terms, described in
+[`docs/sources.md`](docs/sources.md).
+
 ---
 
 ## Resumo em português
