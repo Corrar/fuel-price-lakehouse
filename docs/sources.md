@@ -234,15 +234,48 @@ Concorrência)", `sdc@anp.gov.br`.
   2006–2020, and the CSVs inside the 2022–2025 ZIPs).
 - Full-file statistics for old automotive files, for the four-week diesel-CNG
   and LPG files, and for the monthly files.
-- Whether monthly files overlap semester files (no pair covering the same
-  period was sampled).
 - Whether already published semester files are corrected or re-issued later.
   There are no validators, and this was a single observation.
-- The actual weekday of the weekly update. Only one "atualizado em" stamp was
-  seen (23/11/2026, a Monday).
+- The actual weekday of the weekly update. ANP says results are published "como
+  regra geral, às sextas-feiras", but the one "atualizado em" stamp seen on the
+  files page was a Monday (23/11/2026).
 - The licence field of the dataset record on dados.gov.br (needs a browser or
   an API key), or a written answer from ANP (`sdc@anp.gov.br`).
 - Behaviour under parallel or high-volume requests.
+
+### 1.8 Survey conventions
+
+Researched on 2026-11-26 from ANP's own pages and files, and checked against
+the collected data. These are the facts the staged and curated layers rely on.
+
+| Topic | What was established | Source |
+| --- | --- | --- |
+| **Survey week** | Sunday to Saturday. All 1,163 weeks from 2004 to 2026 in ANP's weekly spreadsheets (`DATA INICIAL` / `DATA FINAL`) start on a Sunday and end on a Saturday. Bucketing `Data da Coleta` that way reproduces ANP's station counts for the week of 15–21/11/2026 for all seven products. ANP never states the convention in words, and two week labels on its pages are off by a day, so the week is always computed from the collection date. | [weekly series since 2013](https://www.gov.br/anp/pt-br/assuntos/precos-e-defesa-da-concorrencia/precos/precos-revenda-e-de-distribuicao-combustiveis/shlp/semanal/semanal-brasil-desde-2013.xlsx) |
+| **Who is surveyed** | Not a fixed panel: stations are drawn at random every week from ANP's registry, with a quota per locality. The full design is 459 localities and 10,920 visits a week; budget cuts reduced it between July 2024 and November 2025. | [survey information page](https://www.gov.br/anp/pt-br/assuntos/precos-e-defesa-da-concorrencia/precos/precos-revenda-e-de-distribuicao-combustiveis/informacoes-levantamento-de-precos-de-combustiveis), [2025 impact report](https://www.gov.br/anp/pt-br/assuntos/consultas-e-audiencias-publicas/consulta-previa/2025/cp-03-2025/rpair.pdf) |
+| **Gaps** | "Não houve pesquisa de preços entre 23/8/2020 e 17/10/2020." The week of 18–24/09/2022 has no station-level rows (change of contractor). The weeks right after each gap have far fewer stations than usual. | [survey information page](https://www.gov.br/anp/pt-br/assuntos/precos-e-defesa-da-concorrencia/precos/precos-revenda-e-de-distribuicao-combustiveis/informacoes-levantamento-de-precos-de-combustiveis); the collected data |
+| **Averages** | A municipality's average is a simple mean of its stations (reproduced for 2,493 of 2,494 municipality-products of one week). ANP's state and national averages are weighted by sales volume, which is not in the open data. **This project publishes simple means over surveyed stations, so its state and national figures differ slightly from ANP's bulletins.** | the collected data, compared with ANP's weekly summary |
+| **`Valor de Compra`** | The distribution price paid by the station. "Série disponível até agosto de 2020"; the last value in the data is dated 17/08/2020. | [metadata PDF](https://www.gov.br/anp/pt-br/centrais-de-conteudo/dados-abertos/arquivos/shpc/metadados-serie-historica-precos-combustiveis-1.pdf) |
+| **`Bandeira` = `BRANCA`** | A station that "opta por não exibir marca comercial de nenhuma distribuidora" (white-flag, unbranded). | metadata PDF |
+| **Products** | `GASOLINA ADITIVADA` appears from 19/10/2020. Prices are cash prices; three decimal places were legitimate until May 2022. | survey information page; the collected data |
+| **Ethanol rule of thumb** | Ethanol "só é economicamente vantajoso […] quando o preço deste representar 70% ou menos do valor da gasolina comum". No more recent ANP statement was found, and gasoline now carries more ethanol than in 2016, so the dashboard presents it as a rule of thumb. | [ANP, Boletim Anual de Preços 2016, p. 66](https://www.gov.br/anp/pt-br/assuntos/precos-e-defesa-da-concorrencia/precos/arquivos-boletim-anual-de-precos/boletim-2016.pdf) |
+
+Found while profiling the history since 2020 (6,974,928 rows in 41 files):
+
+- The 2025-S1 automotive file ends with 9,114 rows in which all 16 fields are
+  empty.
+- The two 2025-S2 semester files write the CNPJ as 14 bare digits (every other
+  file uses the mask with a leading space) and the GNV unit as `R$ / m3`
+  instead of `R$ / m³`.
+- The same station, product and date never has two different prices across
+  files. Inside one file it happens for 4 keys (one station, June 2024), and
+  16 rows are exact duplicates of another row.
+- The month of June 2026 is identical, row for row, in the monthly file and in
+  the semester file (53,454 rows). The last-four-weeks file and the monthly
+  file agree on every price; 22 of 20,773 shared rows differ in the station's
+  name or address only, the four-week file being the more recent registry.
+- A station's name changes over time for 8 % of CNPJs and its brand for 23 %
+  (many of them the renaming of Petrobras Distribuidora to Vibra). The CNPJ is
+  the only stable key.
 
 ---
 
