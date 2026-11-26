@@ -1,0 +1,32 @@
+[project]
+name = "fuel-price-lakehouse"
+version = "0.0.1"
+description = "Weekly incremental pipeline for Brazilian fuel prices (ANP) and macro series (Banco Central SGS): raw, staged, quarantine and curated Parquet layers with a published data quality report."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = []
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "ruff>=0.8",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/fuel_price_lakehouse"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "C4", "PTH", "RUF"]
