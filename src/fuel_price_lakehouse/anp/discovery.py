@@ -205,17 +205,18 @@ def select(files: tuple[RemoteFile, ...] | list[RemoteFile], since: date) -> lis
 
     The same weeks are published three times: in semester files, in monthly
     files and in the rolling last-four-weeks file. For each fuel family this
-    takes semester files while they exist, monthly files only for the months
-    after the last semester file, and always the rolling files, which hold the
-    newest weeks.
+    takes the semester files, then a monthly file only when no semester file
+    covers that month, and always the rolling files, which hold the newest
+    weeks.
     """
     chosen: list[RemoteFile] = []
     for semester_dataset, monthly_datasets in _FAMILIES:
         semesters = [
-            f for f in files if f.grain is Grain.SEMESTER and f.dataset is semester_dataset
+            f
+            for f in files
+            if f.grain is Grain.SEMESTER and f.dataset is semester_dataset and f.start and f.end
         ]
-        covered_until = max((f.end for f in semesters if f.end), default=None)
-        chosen += [f for f in semesters if f.end and f.end >= since]
+        chosen += [f for f in semesters if f.end >= since]
         chosen += [
             f
             for f in files
@@ -224,7 +225,7 @@ def select(files: tuple[RemoteFile, ...] | list[RemoteFile], since: date) -> lis
             and f.start
             and f.end
             and f.end >= since
-            and (covered_until is None or f.start > covered_until)
+            and not any(s.start <= f.start and f.end <= s.end for s in semesters)
         ]
     chosen.sort(key=lambda f: (f.start or date.max, f.dataset.value))
     chosen += sorted(

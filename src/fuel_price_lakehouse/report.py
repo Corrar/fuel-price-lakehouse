@@ -57,5 +57,8 @@ class Report:
             f"{self.count(status)} {status.value}" for status in Status if self.count(status)
         )
         fetched = sum(o.size_bytes for o in self.outcomes if o.status is Status.DOWNLOADED)
-        lines.append(f"total: {counts or 'nothing to do'}; {fetched:,d} bytes downloaded")
+        total = f"total: {counts or 'nothing to do'}; {fetched:,d} bytes downloaded"
+        if planned := sum(o.size_bytes for o in self.outcomes if o.status is Status.PLANNED):
+            total += f"; {planned:,d} bytes planned"
+        lines.append(total)
         return "\n".join(lines)

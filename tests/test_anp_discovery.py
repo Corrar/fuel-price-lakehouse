@@ -71,12 +71,14 @@ def test_rolling_files_have_no_fixed_period(landing_html):
     assert all(f.start is None and f.period == "last-4-weeks" for f in rolling)
 
 
-def test_select_prefers_semesters_and_adds_only_the_months_after_them(landing_html):
+def test_select_prefers_semesters_and_adds_only_the_months_they_do_not_cover(landing_html):
     chosen = select(parse_landing_page(landing_html).files, since=date(2022, 1, 1))
 
     assert [(f.dataset.value, f.period) for f in chosen] == [
         ("automotive", "2022-S1"),
+        ("gasoline_ethanol", "2023-03"),  # the fixture has no 2023-S1 automotive file
         ("automotive", "2025-S2"),
+        ("lpg", "2025-12"),  # nor a 2025-S2 LPG file
         ("automotive", "2026-S1"),
         ("lpg", "2026-S1"),
         ("diesel_cng", "2026-07"),
@@ -105,3 +107,13 @@ def test_select_uses_monthly_files_when_a_family_has_no_semester_file():
     chosen = select(catalogue.files, since=date(2026, 10, 1))
 
     assert [f.period for f in chosen] == ["2026-10"]
+
+
+def test_select_falls_back_to_monthly_files_for_a_semester_that_is_not_published(landing_html):
+    files = [f for f in parse_landing_page(landing_html).files if f.filename != "ca-2026-01.zip"]
+
+    chosen = [(f.dataset.value, f.period) for f in select(files, since=date(2026, 1, 1))]
+
+    assert ("gasoline_ethanol", "2026-02") in chosen  # no 2026-S1 automotive file to cover it
+    assert ("gasoline_ethanol", "2026-04") in chosen
+    assert ("lpg", "2026-S1") in chosen  # the LPG family still has its semester file

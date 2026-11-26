@@ -1,9 +1,11 @@
 """Incremental collection of Banco Central SGS series into the raw layer.
 
-The API has no "changed since" filter, so each run asks again for a short
-window before the last observation it already holds. That overlap is what
-catches late publications and revisions; the staged layer keeps the most
-recently fetched value for each date.
+The API has no "changed since" filter, so the history is cut into calendar
+years. A year that is over is fetched once. The current year is fetched on
+every run, and so is the previous one for a while after it ends: that is what
+picks up new observations, late publications and revised values. A year is
+only considered done when the manifest holds a response for it, so a request
+that fails is simply made again by the next run.
 """
 
 from __future__ import annotations
@@ -28,7 +30,6 @@ log = logging.getLogger(__name__)
 
 SOURCE = Source.BCB_SGS.value
 BASE_URL = "https://api.bcb.gov.br/dados/serie/bcdata.sgs.{code}/dados"
-MAX_DAILY_WINDOW_YEARS = 10
 _DATE = "%d/%m/%Y"
 
 
@@ -36,9 +37,8 @@ _DATE = "%d/%m/%Y"
 class Series:
     code: int
     name: str
-    daily: bool
-    overlap_days: int
-    """How far before the last known observation each run looks again."""
+    settle_days: int
+    """How long after a year ends it is still fetched again on every run."""
 
     @property
     def dataset(self) -> str:
@@ -46,48 +46,22 @@ class Series:
 
 
 SERIES: tuple[Series, ...] = (
-    Series(1, "usd_brl_sell_rate", daily=True, overlap_days=30),
-    Series(433, "ipca_monthly_change", daily=False, overlap_days=100),
+    Series(1, "usd_brl_sell_rate", settle_days=30),
+    Series(433, "ipca_monthly_change", settle_days=100),
 )
 
 
-def windows(start: date, end: date, *, daily: bool) -> list[tuple[date, date]]:
-    """Split ``start..end`` into request windows the API accepts.
-
-    Daily series are refused beyond ten years per request; monthly series have
-    no such limit.
-    """
-    if start > end:
-        return []
-    if not daily:
-        return [(start, end)]
-    result = []
-    cursor = start
-    while cursor <= end:
-        year = cursor.year + MAX_DAILY_WINDOW_YEARS
-        try:
-            limit = cursor.replace(year=year)
-        except ValueError:  # 29 February
-            limit = cursor.replace(year=year, day=28)
-        stop = min(end, limit - timedelta(days=1))
-        result.append((cursor, stop))
-        cursor = stop + timedelta(days=1)
-    return result
-
-
-def pending_ranges(
-    entries: list[Entry], series: Series, since: date, today: date
-) -> list[tuple[date, date]]:
-    """Date ranges still to request, given what the manifest already holds."""
-    if not entries:
-        return [(since, today)]
-    earliest = min(date.fromisoformat(e.details["window_start"]) for e in entries)
-    latest = max(date.fromisoformat(e.details["last_observation"]) for e in entries)
-    ranges = []
-    if since < earliest:
-        ranges.append((since, earliest - timedelta(days=1)))
-    ranges.append((max(since, latest - timedelta(days=series.overlap_days)), today))
-    return ranges
+def years_to_request(
+    collected: set[int], series: Series, since: date, today: date, *, force: bool = False
+) -> list[int]:
+    """Calendar years to ask the API for, given the years the manifest already holds."""
+    wanted = range(since.year, today.year + 1)
+    if force:
+        return list(wanted)
+    still_open = {today.year}
+    if today - date(today.year, 1, 1) < timedelta(days=series.settle_days):
+        still_open.add(today.year - 1)
+    return [year for year in wanted if year not in collected or year in still_open]
 
 
 def parse_observations(body: bytes) -> list[date]:
@@ -127,46 +101,50 @@ def collect(
     today: date,
     policy: http.RetryPolicy,
     series: tuple[Series, ...] = SERIES,
+    force: bool = False,
     dry_run: bool = False,
     pause: float = 1.0,
     sleep: Callable[[float], None] = time.sleep,
 ) -> Report:
+    """Fetch every year of every series that is missing or may still change.
+
+    One request failing does not stop the others, and the manifest is saved
+    after each stored response.
+    """
     report = Report()
     for one in series:
-        entries = manifest.for_dataset(SOURCE, one.dataset)
-        for range_start, range_end in pending_ranges(entries, one, since, today):
-            for start, end in windows(range_start, range_end, daily=one.daily):
-                sleep(pause)
-                period = f"{start:%Y%m%d}-{end:%Y%m%d}"
-                try:
-                    outcome = _collect_window(
-                        client, manifest, root, one, start, end, period, policy, dry_run
-                    )
-                except (http.FetchError, httpx.HTTPError, OSError) as error:
-                    log.error("SGS %s %s failed: %s", one.code, period, error)
-                    outcome = Outcome(SOURCE, one.dataset, period, Status.FAILED, detail=str(error))
-                report.add(outcome)
+        collected = {e.details["year"] for e in manifest.for_dataset(SOURCE, one.dataset)}
+        for year in years_to_request(collected, one, since, today, force=force):
+            sleep(pause)
+            try:
+                outcome = _collect_year(client, manifest, root, one, year, policy, dry_run)
+            except (http.FetchError, httpx.HTTPError, OSError) as error:
+                log.error("SGS %s %s failed: %s", one.code, year, error)
+                outcome = Outcome(SOURCE, one.dataset, str(year), Status.FAILED, detail=str(error))
+            report.add(outcome)
     return report
 
 
-def _collect_window(
+def _collect_year(
     client: httpx.Client,
     manifest: Manifest,
     root: Path,
     series: Series,
-    start: date,
-    end: date,
-    period: str,
+    year: int,
     policy: http.RetryPolicy,
     dry_run: bool,
 ) -> Outcome:
+    period = str(year)
     if dry_run:
         return Outcome(SOURCE, series.dataset, period, Status.PLANNED, detail=series.name)
 
+    # The window always spans the whole calendar year, even when it has not
+    # ended, so the request URL for a year never changes between runs. One year
+    # is also far below the ten-year limit the API puts on daily series.
     params = {
         "formato": "json",
-        "dataInicial": start.strftime(_DATE),
-        "dataFinal": end.strftime(_DATE),
+        "dataInicial": date(year, 1, 1).strftime(_DATE),
+        "dataFinal": date(year, 12, 31).strftime(_DATE),
     }
     response = http.get(client, BASE_URL.format(code=series.code), policy=policy, params=params)
     if _is_empty_window(response):
@@ -184,15 +162,10 @@ def _collect_window(
     if manifest.has(url, sha256):
         return Outcome(SOURCE, series.dataset, period, Status.UNCHANGED, detail="same content")
 
+    known = manifest.latest(url)
     target = (
         partition_dir(
-            Layer.RAW,
-            Source.BCB_SGS,
-            series.dataset,
-            root,
-            start=f"{start:%Y%m%d}",
-            end=f"{end:%Y%m%d}",
-            sha256=sha256[:12],
+            Layer.RAW, Source.BCB_SGS, series.dataset, root, year=year, sha256=sha256[:12]
         )
         / "data.json"
     )
@@ -213,11 +186,11 @@ def _collect_window(
             details={
                 "series_code": series.code,
                 "series_name": series.name,
-                "window_start": start.isoformat(),
-                "window_end": end.isoformat(),
+                "year": year,
                 "observations": len(observations),
                 "first_observation": min(observations).isoformat(),
                 "last_observation": max(observations).isoformat(),
+                "replaces": known.sha256 if known else None,
             },
         )
     )

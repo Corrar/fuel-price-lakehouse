@@ -56,7 +56,14 @@ def collect(
     file, so an interrupted run resumes where it stopped.
     """
     report = Report()
-    catalogue = discover(client, policy=policy)
+    try:
+        catalogue = discover(client, policy=policy)
+    except (http.FetchError, httpx.HTTPError) as error:
+        # Without the catalogue nothing can be collected, but the failure is
+        # reported like any other so the rest of the run still gets its summary.
+        log.error("ANP landing page failed: %s", error)
+        report.add(Outcome(SOURCE, "catalogue", "landing-page", Status.FAILED, detail=str(error)))
+        return report
     report.warnings += [f"unclassified ANP link: {url}" for url in catalogue.unclassified]
     selected = select(catalogue.files, since)
     log.info("ANP: %d files published, %d selected", len(catalogue.files), len(selected))
@@ -74,6 +81,20 @@ def collect(
 
 def _outcome(remote: RemoteFile, status: Status, size: int = 0, detail: str = "") -> Outcome:
     return Outcome(SOURCE, remote.dataset.value, remote.period, status, size, detail)
+
+
+def _reject_non_data(path: Path, filename: str, content_type: str) -> None:
+    """Refuse what is plainly not a data file, such as an error page served with status 200.
+
+    This is not validation of the contents, which belongs to the next stage. It
+    only keeps things that could never be data out of the raw layer.
+    """
+    with path.open("rb") as handle:
+        head = handle.read(64)
+    if "html" in content_type.lower() or head.lstrip(b"\xef\xbb\xbf \t\r\n").startswith(b"<"):
+        raise http.FetchError(f"expected a data file, got markup ({content_type or 'no type'})")
+    if filename.lower().endswith(".zip") and not head.startswith(b"PK\x03\x04"):
+        raise http.FetchError("file is named .zip but is not a ZIP archive")
 
 
 def _collect_one(
@@ -97,14 +118,14 @@ def _collect_one(
         log.info("ANP %s %s: size %s -> %s", remote.dataset, remote.period, known.size_bytes, size)
 
     if dry_run:
-        return _outcome(remote, Status.PLANNED, detail=remote.filename)
+        size = http.remote_size(client, remote.url, policy=policy) or 0
+        return _outcome(remote, Status.PLANNED, size, detail=remote.filename)
 
     filename = safe_filename(remote.filename)
     incoming = root / "tmp" / f"anp-{remote.dataset.value}-{remote.period}-{filename}.part"
     try:
         result = http.download(client, remote.url, incoming, policy=policy)
-        if "html" in result.content_type.lower():
-            raise http.FetchError(f"expected a data file, got {result.content_type}")
+        _reject_non_data(incoming, filename, result.content_type)
         if manifest.has(remote.url, result.sha256):
             return _outcome(remote, Status.UNCHANGED, detail="same content as recorded")
 

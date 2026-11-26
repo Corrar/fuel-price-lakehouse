@@ -92,9 +92,29 @@ Sizes as served (compressed for `.zip`), read from response headers.
 | `qus/ultimas-4-semanas-diesel-gnv.csv` | 3,676,815 |
 | `qus/ultimas-4-semanas-glp.csv` | 2,265,503 |
 
-- The 13 automotive semester files measured add up to 1,072,807,330 bytes
-  (1,023 MiB) as served. That is 13 of 45, so the full history is larger; the
-  total was not measured.
+Every file the collector would download was then sized with one-byte range
+requests (nothing downloaded), on the same day:
+
+| History starting in | Files | Download |
+| --- | ---: | ---: |
+| 2026 | 17 | 96 MB |
+| 2025 | 21 | 142 MB |
+| 2024 | 25 | 186 MB |
+| 2023 | 29 | 242 MB |
+| 2022 (pipeline default) | 33 | 287 MB |
+| 2020 | 41 | 603 MB |
+| 2015 | 61 | 1,658 MB |
+| 2010 | 81 | 3,045 MB |
+| 2004 (everything) | 105 | 4,813 MB |
+
+- "Files" is the smallest set that covers the period: semester files, the
+  monthly files not yet covered by a semester file (July to October 2026) and
+  the three four-week files. MB is 10^6 bytes; the full history is
+  4,813,201,103 bytes.
+- The largest single file is `ca-2004-02.csv`, 158,110,155 bytes. From 2022 on
+  the zipped automotive semester files are between 7.2 and 17.3 MB each.
+- The default period was also downloaded for real: 33 files, 287,459,591
+  bytes, matching the sizes above.
 - Row counts of the files downloaded in full: `ca-2026-01` 422,418 rows;
   last-four-weeks gasoline-ethanol 47,769 rows; `glp-2004-01` 45,925 rows.
 
@@ -125,9 +145,10 @@ Regiao - Sigla;Estado - Sigla;Municipio;Revenda;CNPJ da Revenda;Nome da Rua;Nume
   `DIESEL S10`.
 - Units: `R$ / litro`, `R$ / m³` (GNV), `R$ / 13 kg` (GLP). Consistent per
   product.
-- ZIP member names are not reliable: the UTF-8 name flag is off and the name
-  contains non-ASCII characters (`Preços semestrais - AUTOMOTIVOS_2026.01.csv`).
-  Read the member by position, not by name.
+- ZIP member names are not reliable: they contain non-ASCII characters
+  (`Preços semestrais - AUTOMOTIVOS_2026.01.csv`) and the UTF-8 name flag is
+  set in some archives and not in others. Read the member by position, not by
+  name. Every archive opened so far holds exactly one member.
 
 **Does the schema change between periods?** Not in the samples. The header of
 the semester files for 2004, 2005, 2007, 2009, 2011, 2013, 2015, 2017, 2019,
@@ -168,23 +189,37 @@ malformed CEP, wrong field counts (with a proper CSV parser), unexpected units.
 
 ### 1.6 Licence
 
-- Neither the landing page body nor the metadata PDF states a licence for the
-  dataset.
-- The only licence text is the site-wide footer of the page: "Todo o conteúdo
-  deste site está publicado sob a licença Creative Commons
-  Atribuição-SemDerivações 3.0 Não Adaptada" (CC BY-ND 3.0).
-- Whether that footer governs the data files is **not stated**. Until this is
-  settled, the project credits ANP as the source and treats redistribution of
-  transformed data as an open question. See "To confirm".
-- Source and contact given in the PDF: "ANP/SDC (Superintendência de Defesa da
-  Concorrência)", `sdc@anp.gov.br`.
+No licence is declared for this dataset in any official source that could be
+read. What was checked:
+
+| Where | What it says |
+| --- | --- |
+| Landing page body, metadata PDF | No licence. |
+| Landing page footer | "Todo o conteúdo deste site está publicado sob a licença Creative Commons Atribuição-SemDerivações 3.0 Não Adaptada" (CC BY-ND 3.0). Site-wide text; it does not mention the data files. |
+| ANP open data page (<https://www.gov.br/anp/pt-br/centrais-de-conteudo/dados-abertos>) | No licence in the body; same site footer. |
+| ANP Open Data Plan 2026-2028 (<https://www.gov.br/anp/pt-br/centrais-de-conteudo/dados-abertos/arquivos/home/pda-2026-2028.pdf>) | No mention of a licence. It cites Decreto 8.777/2016, the federal open data policy, and lists encouraging reuse ("Estímulo ao reúso") as a goal. |
+| A third-party catalogue mirroring the record (<https://data.amerigeoss.org/api/3/action/package_show?id=serie-historica-de-precos-de-combustiveis-por-revenda>) | `license_id: cc-by`, author ANP. Second-hand, so not evidence of the current terms. |
+| dados.gov.br | Could not be read: the page needs JavaScript and the API requires a key. |
+
+Reading of the above (not legal advice): the only restrictive signal is the
+website footer, which reads as covering the site's own content; the open data
+policy ANP itself invokes points to reuse with attribution. Because the one
+place where the licence would normally be declared could not be read, this
+project takes the cautious route for now:
+
+- ANP is always credited as the source ("ANP — Série Histórica de Preços de
+  Combustíveis").
+- **Nothing derived from ANP files is published by this repository** until the
+  question is settled.
+
+Source and contact given in the metadata PDF: "ANP/SDC (Superintendência de
+Defesa da Concorrência)", `sdc@anp.gov.br`.
 
 ### 1.7 To confirm
 
-- Sizes of the other 32 automotive and 43 LPG semester files, and of 134 of the
-  138 monthly files; therefore the total size of the full history.
-- Contents of the semester files for the years not sampled (even years
-  2006–2020, and the CSVs inside the 2022–2025 ZIPs).
+- Contents of the semester files before 2022 for the years not sampled (even
+  years 2006–2020). Every file from 2022 onwards was downloaded and has the
+  header above.
 - Full-file statistics for old automotive files, for the four-week diesel-CNG
   and LPG files, and for the monthly files.
 - Whether monthly files overlap semester files (no pair covering the same
@@ -193,8 +228,9 @@ malformed CEP, wrong field counts (with a proper CSV parser), unexpected units.
   There are no validators, and this was a single observation.
 - The actual weekday of the weekly update. Only one "atualizado em" stamp was
   seen (23/11/2026, a Monday).
-- Whether CC BY-ND 3.0 applies to the data files, and whether a separate open
-  data record with an explicit licence exists.
+- The licence field of the dataset record on dados.gov.br (needs a browser or
+  an API key), or a written answer from ANP.
+- The text of Decreto 8.777/2016 on reuse was not re-read for this document.
 - Behaviour under parallel or high-volume requests.
 
 ---
@@ -323,6 +359,8 @@ entre dataFinal e dataInicial não deve ser superior a 10 anos", last N values
   (<https://dadosabertos.bcb.gov.br/dataset/1-taxa-de-cambio---livre---dolar-americano-venda---diario>)
   states "Open Data Commons Open Database License (ODbL)". The portal's
   metadata gives the same licence for series 1, 10813, 432 and 11.
+- Through the portal's catalogue API, 4,260 of its 4,261 datasets are tagged
+  ODbL.
 - Series 433, 13522, 3698 and 189 have **no page on the portal**, so the
   licence for them was not confirmed. Their data originates from IBGE (IPCA)
   and FGV (IGP-M), according to the SGS metadata.
@@ -357,7 +395,7 @@ Decisions the measurements above force on the later stages.
 | BOM, decimal comma, padded CNPJ, stray whitespace | Normalise in the staged layer; keep the raw file untouched. |
 | Purchase price empty since 2020 | Nullable column, never a validation failure. |
 | Station names drift for the same CNPJ | CNPJ is the station key; names are attributes. |
-| SGS daily series limited to 10 years per request | Fetch in windows of at most 10 years; monthly series in one request. |
+| SGS daily series limited to 10 years per request | Fetch one calendar year per request, for every series. |
 | SGS returns 404 for an empty window | Treat 404 "Value(s) not found" as "no data", not as an error. |
 | SGS values are strings | Parse explicitly to decimal; never rely on JSON typing. |
 | SGS daily series skip non-business days | Join fuel prices to the latest available rate on or before the date. |

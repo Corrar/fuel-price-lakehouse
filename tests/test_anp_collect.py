@@ -4,7 +4,6 @@ from datetime import date
 import httpx
 import pytest
 
-from fuel_price_lakehouse import http
 from fuel_price_lakehouse.anp import collect as anp
 from fuel_price_lakehouse.anp.discovery import LANDING_URL
 from fuel_price_lakehouse.layout import manifest_path
@@ -165,16 +164,21 @@ def test_dry_run_plans_without_downloading_or_writing(site, tmp_path, policy):
     report, manifest = run(site, tmp_path, policy, dry_run=True)
 
     assert report.count(Status.PLANNED) == 6
+    assert all(o.size_bytes == len(site.body(o.detail)) for o in report.outcomes)
+    assert "bytes planned" in report.summary()
     assert site.downloads == []
     assert manifest.entries == ()
     assert not (tmp_path / "raw").exists()
 
 
-def test_an_html_error_page_is_not_stored_as_data(site, tmp_path, policy):
+@pytest.mark.parametrize("content_type", ["text/html", "text/csv"])
+def test_an_error_page_is_not_stored_as_data_whatever_its_content_type(
+    site, tmp_path, policy, content_type
+):
     def handler(request):
         if str(request.url) == LANDING_URL:
             return httpx.Response(200, text=site.landing_html)
-        return httpx.Response(200, text="<html>erro</html>", headers={"Content-Type": "text/html"})
+        return httpx.Response(200, text="<html>erro</html>", headers={"Content-Type": content_type})
 
     report, manifest = run(handler, tmp_path, policy)
 
@@ -183,23 +187,51 @@ def test_an_html_error_page_is_not_stored_as_data(site, tmp_path, policy):
     assert not (tmp_path / "raw").exists()
 
 
+def test_a_zip_that_is_not_a_zip_is_rejected(site, tmp_path, policy):
+    site.bodies["glp-2026-01.csv"] = b"\xef\xbb\xbfRegiao - Sigla;Estado - Sigla\r\n"
+    site.bodies["ca-2025-02.zip"] = b"PK\x03\x04 pretend archive"
+    # ca-2026-01.zip keeps the default plain-text body
+
+    manifest = Manifest.load(manifest_path(tmp_path))
+    client = httpx.Client(transport=httpx.MockTransport(site))
+    report = anp.collect(
+        client, manifest, tmp_path, since=date(2025, 7, 1), policy=policy, sleep=no_sleep
+    )
+
+    failed = [o for o in report.outcomes if o.status is Status.FAILED]
+    assert [(o.dataset, o.period) for o in failed] == [("automotive", "2026-S1")]
+    assert "not a ZIP" in failed[0].detail
+    assert ("automotive", "2025-S2") in [
+        (o.dataset, o.period) for o in report.outcomes if o.status is Status.DOWNLOADED
+    ]
+
+
 def test_unclassified_links_become_warnings(site, tmp_path, policy):
     report, _ = run(site, tmp_path, policy, dry_run=True)
 
     assert any("arquivo-novo.csv" in warning for warning in report.warnings)
 
 
-def test_a_landing_page_without_data_links_aborts_the_run(tmp_path, policy):
-    client = httpx.Client(
-        transport=httpx.MockTransport(lambda r: httpx.Response(200, text="<html></html>"))
+@pytest.mark.parametrize(
+    "handler",
+    [
+        lambda request: httpx.Response(200, text="<html></html>"),
+        lambda request: httpx.Response(403),
+        lambda request: (_ for _ in ()).throw(httpx.ConnectError("no route")),
+    ],
+    ids=["no-data-links", "forbidden", "unreachable"],
+)
+def test_a_broken_landing_page_is_one_reported_failure_not_a_crash(tmp_path, policy, handler):
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+
+    report = anp.collect(
+        client,
+        Manifest.load(manifest_path(tmp_path)),
+        tmp_path,
+        since=SINCE,
+        policy=policy,
+        sleep=no_sleep,
     )
 
-    with pytest.raises(http.FetchError, match="layout changed"):
-        anp.collect(
-            client,
-            Manifest.load(manifest_path(tmp_path)),
-            tmp_path,
-            since=SINCE,
-            policy=policy,
-            sleep=no_sleep,
-        )
+    assert report.failed
+    assert [(o.dataset, o.period) for o in report.outcomes] == [("catalogue", "landing-page")]

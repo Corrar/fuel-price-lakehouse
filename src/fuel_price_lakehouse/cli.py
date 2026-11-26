@@ -18,8 +18,9 @@ from fuel_price_lakehouse.report import Report
 from fuel_price_lakehouse.sgs import collect as sgs
 
 DEFAULT_SINCE = "2022-01"
-"""Semester files are zipped (about 9 MB each) from 2022 onwards; earlier ones are
-plain CSV of up to 157 MB each. Older history is an explicit choice, not the default."""
+"""From 2022 on the automotive semester files are zipped (7 to 17 MB each); before
+that they are plain CSV of up to 158 MB each. The default is a first run of about
+290 MB; the full history since 2004 is 4.8 GB and is an explicit choice."""
 
 SOURCE_TIMEZONE = ZoneInfo("America/Sao_Paulo")
 
@@ -51,7 +52,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--dry-run", action="store_true", help="show what would be fetched; download nothing"
     )
     collect.add_argument(
-        "--force", action="store_true", help="download ANP files again even if the size matches"
+        "--force",
+        action="store_true",
+        help="fetch everything again; content already recorded is still not duplicated",
     )
     collect.add_argument(
         "--pause", type=float, default=1.0, help="seconds between requests (default: 1.0)"
@@ -74,6 +77,7 @@ def run_collect(args: argparse.Namespace) -> Report:
                     since=args.since,
                     today=datetime.now(SOURCE_TIMEZONE).date(),
                     policy=policy,
+                    force=args.force,
                     dry_run=args.dry_run,
                     pause=args.pause,
                 )
@@ -98,11 +102,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     logging.getLogger("httpx").setLevel(logging.WARNING)
-    try:
-        report = run_collect(args)
-    except http.FetchError as error:
-        logging.getLogger(__name__).error("collection aborted: %s", error)
-        return 1
+    report = run_collect(args)
     print(report.summary())
     return 1 if report.failed else 0
 

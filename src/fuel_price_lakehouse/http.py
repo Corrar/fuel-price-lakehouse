@@ -19,7 +19,6 @@ from tenacity import (
 
 log = logging.getLogger(__name__)
 
-RETRY_STATUS = frozenset({429, 500, 502, 503, 504})
 _CONTENT_RANGE_TOTAL = re.compile(r"/(\d+)\s*$")
 _CHUNK = 1 << 20
 
@@ -79,7 +78,7 @@ def _log_retry(state: RetryCallState) -> None:
 
 
 def _check_retryable(response: httpx.Response) -> None:
-    if response.status_code in RETRY_STATUS:
+    if response.status_code == 429 or response.status_code >= 500:
         raise RetryableError(f"HTTP {response.status_code} from {response.request.url}")
 
 

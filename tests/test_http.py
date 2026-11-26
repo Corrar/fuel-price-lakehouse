@@ -47,6 +47,18 @@ def test_get_retries_on_connection_errors(policy):
     assert http.get(client_for(handler), "https://example.test/x", policy=policy).status_code == 200
 
 
+@pytest.mark.parametrize("status", [429, 500, 503, 520])
+def test_overload_and_any_server_error_are_retried(policy, status):
+    calls = []
+
+    def handler(request):
+        calls.append(request)
+        return httpx.Response(status) if len(calls) == 1 else httpx.Response(200)
+
+    assert http.get(client_for(handler), "https://example.test/x", policy=policy).status_code == 200
+    assert len(calls) == 2
+
+
 def test_get_does_not_retry_client_errors(policy):
     calls = []
 
