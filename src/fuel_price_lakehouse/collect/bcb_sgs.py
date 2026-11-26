@@ -15,18 +15,21 @@ with its ETag, which costs a 304 when nothing was published.
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Callable
+import logging
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from pathlib import Path
 
-from fuel_price_lakehouse.http import Fetcher, SourceError, TransientError
+from fuel_price_lakehouse.collect.http import Fetcher, SourceError, TransientError
+from fuel_price_lakehouse.collect.manifest import FileRecord, Manifest, Outcome
+from fuel_price_lakehouse.collect.raw import CorruptFileError, Provenance, write_json_records
+from fuel_price_lakehouse.config import Clock
 from fuel_price_lakehouse.layout import Layer, Source, partition_dir
-from fuel_price_lakehouse.manifest import FileRecord, Manifest, Outcome
-from fuel_price_lakehouse.raw import CorruptFileError, Provenance, write_json_records
 
 API = "https://api.bcb.gov.br/dados/serie/bcdata.sgs.{code}/dados"
 DATASET = "series"
+
+logger = logging.getLogger(__name__)
 
 MAX_WINDOW_YEARS = 10
 """Longest window the API accepts for a daily series (406 beyond it)."""
@@ -93,11 +96,10 @@ def collect(
     root: Path,
     since: date,
     *,
-    now: Callable[[], datetime],
+    now: Clock,
     series: tuple[Series, ...] = SERIES,
     dry_run: bool = False,
     full_check: bool = False,
-    log: Callable[[str], None] = print,
 ) -> list[Outcome]:
     """Bring the raw layer up to date with the SGS API."""
     outcomes = []
@@ -121,12 +123,12 @@ def collect(
                     outcome = Outcome(window.key, "failed", detail=str(error))
                 manifest.save()
             results.append(outcome)
-            log(f"bcb_sgs: {outcome.action:9} {window.key} {outcome.detail}")
+            logger.info("bcb_sgs: %-9s %s %s", outcome.action, window.key, outcome.detail)
         if not dry_run and not _has_rows(manifest, one.code):
             # An unknown series code answers 404 exactly like an empty window does.
             detail = "no data in any window: check the series code"
             results.append(Outcome(f"{Source.BCB_SGS}/{one.code}", "failed", detail=detail))
-            log(f"bcb_sgs: failed    series {one.code} {detail}")
+            logger.error("bcb_sgs: failed    series %s %s", one.code, detail)
         outcomes.extend(results)
     return outcomes
 
@@ -151,12 +153,12 @@ def _collect_window(
     manifest: Manifest,
     root: Path,
     window: Window,
-    now: Callable[[], datetime],
+    now: Clock,
     full_check: bool,
 ) -> Outcome:
     record = manifest.get(window.key)
-    known = record is not None and record.ingested
-    etag = record.details.get("etag", "") if known else ""
+    previous = record if record is not None and record.ingested else None
+    etag = previous.details.get("etag", "") if previous is not None else ""
     headers = {"If-None-Match": etag} if etag and not full_check else None
     response = fetcher.get(window.url, headers=headers, allowed=(200, 304, 404))
     if response.status_code == 304:
@@ -166,11 +168,11 @@ def _collect_window(
     body = b"[]" if response.status_code == 404 else response.content
     sha256 = hashlib.sha256(body).hexdigest()
     new_etag = response.headers.get("ETag", "")
-    if known and record.sha256 == sha256:
-        record.details["etag"] = new_etag
+    if previous is not None and previous.sha256 == sha256:
+        previous.details["etag"] = new_etag
         return Outcome(window.key, "unchanged", len(body), detail="same hash")
-    if response.status_code == 404 and known and record.rows:
-        raise SourceError(f"{window.url}: had {record.rows} rows, now reports no data")
+    if response.status_code == 404 and previous is not None and previous.rows:
+        raise SourceError(f"{window.url}: had {previous.rows} rows, now reports no data")
 
     collected_at = now()
     destination = raw_path(window, root)
@@ -192,4 +194,5 @@ def _collect_window(
             details={"series": str(window.code), "year": str(window.start.year), "etag": new_etag},
         )
     )
-    return Outcome(window.key, "updated" if known else "new", len(body), rows, f"{rows:,} rows")
+    action = "updated" if previous is not None else "new"
+    return Outcome(window.key, action, len(body), rows, f"{rows:,} rows")

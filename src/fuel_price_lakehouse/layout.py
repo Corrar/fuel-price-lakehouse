@@ -54,6 +54,36 @@ def downloads_dir(root: Path = DEFAULT_DATA_ROOT) -> Path:
     return root / "tmp" / "downloads"
 
 
+def staging_state_path(root: Path = DEFAULT_DATA_ROOT) -> Path:
+    """What the staging step already processed, and how each file fared."""
+    return root / "manifest" / "staging.json"
+
+
+def sibling_in_layer(raw_relative: str, layer: Layer) -> str:
+    """Path of the file derived from a raw file, in another layer.
+
+    Staged and quarantine files mirror the raw layout one to one, so a file can
+    be followed across layers by its path alone.
+
+    >>> sibling_in_layer("raw/anp/fuel_prices/kind=monthly/abc.parquet", Layer.QUARANTINE)
+    'quarantine/anp/fuel_prices/kind=monthly/abc.parquet'
+    """
+    first, _, rest = raw_relative.partition("/")
+    if first != Layer.RAW or not rest:
+        raise ValueError(f"not a raw layer path: {raw_relative!r}")
+    return f"{layer.value}/{rest}"
+
+
+def curated_dir(root: Path = DEFAULT_DATA_ROOT) -> Path:
+    """Tables built from the staged layer, one sub-path per table."""
+    return root / Layer.CURATED.value
+
+
+def quality_dir(root: Path = DEFAULT_DATA_ROOT) -> Path:
+    """The latest quality report and the history of past runs."""
+    return root / "quality"
+
+
 def partition_dir(
     layer: Layer,
     source: Source,

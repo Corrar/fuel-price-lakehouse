@@ -10,7 +10,8 @@ import httpx
 import pyarrow.parquet as pq
 import pytest
 
-from fuel_price_lakehouse import extract
+from fuel_price_lakehouse import cli
+from fuel_price_lakehouse.collect.run import run as collect
 from fuel_price_lakehouse.layout import manifest_path
 
 from .conftest import (
@@ -29,9 +30,9 @@ SINCE = date(2026, 7, 1)
 
 
 def run(web: FakeWeb, root: Path, fast: dict, since: date = SINCE, **options):
-    settings = {key: fast[key] for key in ("sleep", "retry", "now", "log")}
+    settings = {key: fast[key] for key in ("sleep", "retry", "now")}
     with web.client() as client:
-        return extract.run(root, since, client=client, **settings, **options)
+        return collect(root, since, client=client, **settings, **options)
 
 
 def actions(outcomes) -> dict[str, str]:
@@ -378,6 +379,7 @@ def test_sgs_malformed_body_is_a_failure_not_a_raw_file(web, tmp_path, fast):
 
 
 def test_since_must_be_year_month():
-    assert extract.parse_since("2026-07") == date(2026, 7, 1)
-    with pytest.raises(Exception, match="expected YYYY-MM"):
-        extract.parse_since("07/2026")
+    args = cli.build_parser().parse_args(["extract", "--since", "2026-07"])
+    assert args.since == date(2026, 7, 1)
+    with pytest.raises(SystemExit):
+        cli.build_parser().parse_args(["extract", "--since", "07/2026"])

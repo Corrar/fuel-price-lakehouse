@@ -15,25 +15,28 @@ on the page, because their size alone could repeat by chance.
 from __future__ import annotations
 
 import hashlib
+import logging
 import re
 import unicodedata
-from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import urljoin
 
-from fuel_price_lakehouse.http import Fetcher, SourceError, TransientError
+from fuel_price_lakehouse.collect.http import Fetcher, SourceError, TransientError
+from fuel_price_lakehouse.collect.manifest import FileRecord, Manifest, Outcome
+from fuel_price_lakehouse.collect.raw import CorruptFileError, Provenance, write_anp_csv
+from fuel_price_lakehouse.config import Clock
 from fuel_price_lakehouse.layout import Layer, Source, downloads_dir, partition_dir
-from fuel_price_lakehouse.manifest import FileRecord, Manifest, Outcome
-from fuel_price_lakehouse.raw import CorruptFileError, Provenance, write_anp_csv
 
 LANDING_PAGE = (
     "https://www.gov.br/anp/pt-br/centrais-de-conteudo/dados-abertos/"
     "serie-historica-de-precos-de-combustiveis"
 )
 DATASET = "fuel_prices"
+
+logger = logging.getLogger(__name__)
 
 _FILES_MARKER = "/arquivos/shpc/"
 _NOT_DATA = (".pdf",)
@@ -153,10 +156,9 @@ def collect(
     root: Path,
     since: date,
     *,
-    now: Callable[[], datetime],
+    now: Clock,
     dry_run: bool = False,
     full_check: bool = False,
-    log: Callable[[str], None] = print,
 ) -> list[Outcome]:
     """Bring the raw layer up to date with the ANP site.
 
@@ -169,7 +171,7 @@ def collect(
     except (TransientError, SourceError) as error:
         return [Outcome(LANDING_PAGE, "failed", detail=str(error))]
     for url in discovery.unrecognised:
-        log(f"anp: WARNING link not recognised, skipped: {url}")
+        logger.warning("anp: link not recognised, skipped: %s", url)
 
     outcomes = []
     for file in select(discovery.files, since):
@@ -185,7 +187,14 @@ def collect(
         if not dry_run:
             manifest.save()  # after every file: a run that dies keeps what it finished
         outcomes.append(outcome)
-        log(f"anp: {outcome.action:9} {file.kind} {file.fuel_group} {file.period} {outcome.detail}")
+        logger.info(
+            "anp: %-9s %s %s %s %s",
+            outcome.action,
+            file.kind,
+            file.fuel_group,
+            file.period,
+            outcome.detail,
+        )
     return outcomes
 
 
@@ -194,18 +203,18 @@ def _collect_file(
     manifest: Manifest,
     root: Path,
     file: AnpFile,
-    now: Callable[[], datetime],
+    now: Clock,
     dry_run: bool,
     full_check: bool,
 ) -> Outcome:
     record = manifest.get(file.url)
-    known = record is not None and record.ingested
+    previous = record if record is not None and record.ingested else None
     size = fetcher.remote_size(file.url)
     if (
-        known
+        previous is not None
         and not full_check
-        and record.size_bytes == size
-        and record.details.get("published_hint", "") == file.published_hint
+        and previous.size_bytes == size
+        and previous.details.get("published_hint", "") == file.published_hint
     ):
         return Outcome(file.url, "unchanged")
     if dry_run:
@@ -214,9 +223,9 @@ def _collect_file(
     downloaded = downloads_dir(root) / hashlib.sha256(file.url.encode()).hexdigest()[:12]
     try:
         download = fetcher.download(file.url, downloaded)
-        if known and record.sha256 == download.sha256:
+        if previous is not None and previous.sha256 == download.sha256:
             # Same content after all. Remember the new hint so it is not fetched again.
-            record.details = file.details
+            previous.details = file.details
             return Outcome(file.url, "unchanged", download.size_bytes, detail="same hash")
         collected_at = now()
         destination = raw_path(file, root)
@@ -241,7 +250,7 @@ def _collect_file(
             details=file.details,
         )
     )
-    action = "updated" if known else "new"
+    action = "updated" if previous is not None else "new"
     return Outcome(file.url, action, download.size_bytes, rows, f"{rows:,} rows")
 
 

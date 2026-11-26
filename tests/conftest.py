@@ -11,8 +11,8 @@ from datetime import UTC, datetime
 import httpx
 import pytest
 
-from fuel_price_lakehouse import anp
-from fuel_price_lakehouse.http import RetryPolicy
+from fuel_price_lakehouse.collect import anp
+from fuel_price_lakehouse.collect.http import RetryPolicy
 
 FILES = "https://www.gov.br/anp/pt-br/centrais-de-conteudo/dados-abertos/arquivos/shpc"
 SGS = "https://api.bcb.gov.br/dados/serie/bcdata.sgs"
@@ -181,6 +181,5 @@ def fast() -> dict:
         "sleep": waits.append,
         "retry": RetryPolicy(attempts=3, initial_wait=2.0, max_wait=60.0),
         "now": lambda: datetime(2026, 11, 26, 12, 0, tzinfo=UTC),
-        "log": lambda _line: None,
         "waits": waits,
     }

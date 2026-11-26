@@ -2,8 +2,8 @@ from datetime import date
 
 import pytest
 
-from fuel_price_lakehouse import anp
-from fuel_price_lakehouse.http import SourceError
+from fuel_price_lakehouse.collect import anp
+from fuel_price_lakehouse.collect.http import SourceError
 
 from .conftest import FILES, PAGE
 

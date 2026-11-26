@@ -21,7 +21,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import BinaryIO
+from typing import IO, Any
 
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -63,8 +63,7 @@ def write_anp_csv(downloaded: Path, destination: Path, provenance: Provenance) -
         # strict: malformed quoting is an error, not something to guess around.
         reader = csv.reader(text, delimiter=_ANP_DELIMITER, strict=True)
         try:
-            header = next(reader, None)
-            _check_header(header, downloaded)
+            header = _checked_header(next(reader, None), downloaded)
             schema = _schema(
                 header,
                 [pa.field("_field_count", pa.int32()), pa.field("_extra_fields", pa.string())],
@@ -102,7 +101,7 @@ def _as_text(value: object) -> str | None:
 
 
 @contextmanager
-def _open_csv_bytes(path: Path) -> Iterator[BinaryIO]:
+def _open_csv_bytes(path: Path) -> Iterator[IO[bytes]]:
     if not zipfile.is_zipfile(path):
         with path.open("rb") as stream:
             yield stream
@@ -121,19 +120,20 @@ def _open_csv_bytes(path: Path) -> Iterator[BinaryIO]:
         raise CorruptFileError(f"{path.name}: damaged ZIP: {error}") from error
 
 
-def _check_header(header: list[str] | None, path: Path) -> None:
+def _checked_header(header: list[str] | None, path: Path) -> list[str]:
     if not header or len(header) < 2 or header[0].lstrip().startswith("<"):
         raise CorruptFileError(f"{path.name}: no CSV header found")
     if len(set(header)) != len(header) or any(name.startswith("_") for name in header):
         raise CorruptFileError(f"{path.name}: unusable header {header!r}")
+    return header
 
 
 def _anp_batches(
     reader: Iterable[list[str]], header: list[str]
-) -> Iterator[tuple[dict[str, list], int]]:
+) -> Iterator[tuple[dict[str, list[Any]], int]]:
     width = len(header)
 
-    def empty() -> dict[str, list]:
+    def empty() -> dict[str, list[Any]]:
         return {name: [] for name in [*header, "_field_count", "_extra_fields"]}
 
     columns, rows = empty(), 0
@@ -167,7 +167,7 @@ def _schema(source_columns: list[str], extra: list[pa.Field]) -> pa.Schema:
 def _write(
     destination: Path,
     schema: pa.Schema,
-    batches: Iterator[tuple[dict[str, list], int]],
+    batches: Iterator[tuple[dict[str, list[Any]], int]],
     provenance: Provenance,
 ) -> int:
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -176,7 +176,7 @@ def _write(
     try:
         with pq.ParquetWriter(temporary, schema, compression="zstd") as writer:
             for columns, rows in batches:
-                columns["_row_number"] = range(total + 1, total + rows + 1)
+                columns["_row_number"] = list(range(total + 1, total + rows + 1))
                 columns["_source_url"] = [provenance.source_url] * rows
                 columns["_source_sha256"] = [provenance.sha256] * rows
                 columns["_collected_at"] = [provenance.collected_at] * rows

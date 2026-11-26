@@ -69,7 +69,7 @@ class Manifest:
     def __init__(self, path: Path, files: dict[str, FileRecord] | None = None) -> None:
         self.path = path
         self.files: dict[str, FileRecord] = files or {}
-        self._saved = self._dump()
+        self._saved: str | None = self._dump()
 
     @classmethod
     def load(cls, path: Path) -> Manifest:

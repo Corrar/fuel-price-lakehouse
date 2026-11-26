@@ -21,7 +21,7 @@ test: ## Run the test suite
 check: lint test ## Everything CI runs
 
 extract: ## Collect what is new into the raw layer (SINCE=YYYY-MM sets the first month)
-	uv run python -m fuel_price_lakehouse.extract $(if $(SINCE),--since $(SINCE)) $(ARGS)
+	uv run fuel-lakehouse extract $(if $(SINCE),--since $(SINCE)) $(ARGS)
 
 clean: ## Remove caches and build output (never touches data/)
 	rm -rf .pytest_cache .ruff_cache dist build
