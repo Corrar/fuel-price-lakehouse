@@ -110,7 +110,7 @@ def collect(
         results = []
         for window in windows(one.code, since, now().date()):
             record = manifest.get(window.key)
-            if not full_check and _settled(record, window):
+            if not full_check and _settled(record, window, root):
                 outcome = Outcome(window.key, "unchanged")
             elif dry_run:
                 outcome = Outcome(window.key, "planned")
@@ -136,8 +136,8 @@ def collect(
     return outcomes
 
 
-def _settled(record: FileRecord | None, window: Window) -> bool:
-    return record is not None and record.ingested and record.details.get("settled") == "yes"
+def _settled(record: FileRecord | None, window: Window, root: Path) -> bool:
+    return record is not None and record.usable_in(root) and record.details.get("settled") == "yes"
 
 
 def _mark_if_settled(record: FileRecord | None, window: Window, today: date) -> None:
@@ -173,7 +173,7 @@ def _collect_window(
     full_check: bool,
 ) -> Outcome:
     record = manifest.get(window.key)
-    previous = record if record is not None and record.ingested else None
+    previous = record if record is not None and record.usable_in(root) else None
     etag = previous.details.get("etag", "") if previous is not None else ""
     headers = {"If-None-Match": etag} if etag and not full_check else None
     response = fetcher.get(window.url, headers=headers, allowed=(200, 304, 404))

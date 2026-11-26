@@ -209,7 +209,7 @@ def _collect_file(
     full_check: bool,
 ) -> Outcome:
     record = manifest.get(file.url)
-    previous = record if record is not None and record.ingested else None
+    previous = record if record is not None and record.usable_in(root) else None
     size = fetcher.remote_size(file.url)
     if (
         previous is not None

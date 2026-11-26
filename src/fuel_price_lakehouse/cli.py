@@ -71,6 +71,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="wait between requests to the same source (default 1)",
     )
     extract.set_defaults(handler=_extract)
+
+    stage = commands.add_parser(
+        "stage", help="validate raw files into the staged layer; rejected rows go to quarantine"
+    )
+    stage.add_argument(
+        "--full-refresh",
+        action="store_true",
+        help="stage every file again, also the ones that did not change",
+    )
+    stage.set_defaults(handler=_stage)
     return parser
 
 
@@ -100,6 +110,21 @@ def _extract(args: argparse.Namespace) -> int:
     summary = ", ".join(f"{count} {action}" for action, count in sorted(counts.items()))
     verb = "to download" if args.dry_run else "downloaded"
     logger.info("extract: %s; %.1f MB %s", summary or "nothing to do", megabytes, verb)
+    return 1 if counts["failed"] else 0
+
+
+def _stage(args: argparse.Namespace) -> int:
+    from fuel_price_lakehouse.stage.run import run
+
+    outcomes = run(args.root, full_refresh=args.full_refresh)
+    counts = Counter(outcome.action for outcome in outcomes)
+    summary = ", ".join(f"{count} {action}" for action, count in sorted(counts.items()))
+    logger.info(
+        "stage: %s; %s rows in the staged layer, %s in quarantine",
+        summary or "nothing to do",
+        f"{sum(outcome.rows_staged for outcome in outcomes):,}",
+        f"{sum(outcome.rows_quarantined for outcome in outcomes):,}",
+    )
     return 1 if counts["failed"] else 0
 
 

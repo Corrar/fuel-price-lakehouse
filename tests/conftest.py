@@ -27,7 +27,7 @@ HEADER = (
 def anp_csv(*prices: str) -> bytes:
     """An ANP-shaped CSV: BOM, ``;``, CRLF, padded CNPJ, a quoted ``;``, empty fields."""
     rows = [
-        f'SE;SP;SAO PAULO;POSTO {n} LTDA; 01.492.748/0003-83;RUA A;S/N;"LOTE: 04;";'
+        f'SE;SP;SAO PAULO;POSTO {n} LTDA; 11.222.333/0001-81;RUA A;S/N;"LOTE: 04;";'
         f"CENTRO;01000-000;GASOLINA;05/10/2026;{price};;R$ / litro;BRANCA"
         for n, price in enumerate(prices, start=1)
     ]

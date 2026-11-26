@@ -86,7 +86,7 @@ def test_raw_layer_is_a_faithful_text_copy(web, tmp_path, fast):
     assert table.column_names[:16] == source_columns  # BOM gone, names untouched
     assert all(str(table.schema.field(name).type) == "string" for name in source_columns)
     row = table.to_pylist()[0]
-    assert row["CNPJ da Revenda"] == " 01.492.748/0003-83"  # leading space kept
+    assert row["CNPJ da Revenda"] == " 11.222.333/0001-81"  # leading space kept
     assert row["Complemento"] == "LOTE: 04;"  # quoted separator is data, not a new field
     assert row["Valor de Venda"] == "6,01"  # decimal comma kept, still text
     assert row["Valor de Compra"] == ""  # empty stays empty, not null
@@ -354,6 +354,21 @@ def test_full_check_downloads_again_but_rewrites_nothing(web, tmp_path, fast):
     assert set(actions(outcomes).values()) == {"unchanged"}
     assert len(web.downloads()) == 4
     assert snapshot(tmp_path) == before
+
+
+def test_record_whose_raw_file_is_gone_is_collected_again(web, tmp_path, fast):
+    run(web, tmp_path, fast)
+    records = manifest(tmp_path)
+    (tmp_path / records[OCTOBER_DIESEL]["raw_path"]).unlink()
+    (tmp_path / records["bcb_sgs/1/2026"]["raw_path"]).unlink()
+    web.requests.clear()
+
+    outcomes = run(web, tmp_path, fast)
+
+    assert web.downloads() == [OCTOBER_DIESEL]
+    assert (tmp_path / records[OCTOBER_DIESEL]["raw_path"]).is_file()
+    assert (tmp_path / records["bcb_sgs/1/2026"]["raw_path"]).is_file()
+    assert actions(outcomes)[OCTOBER_LPG] == "unchanged"
 
 
 # --- landing zone --------------------------------------------------------------------------------

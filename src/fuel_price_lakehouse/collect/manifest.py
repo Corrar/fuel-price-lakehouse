@@ -56,6 +56,14 @@ class FileRecord:
     def ingested(self) -> bool:
         return self.status == "ok" and self.sha256 is not None
 
+    def usable_in(self, root: Path) -> bool:
+        """Ingested, and its raw file is still on disk.
+
+        A record without its raw file describes work that has to be done
+        again: the collector must not answer "unchanged" for it.
+        """
+        return self.ingested and (self.raw_path is None or (root / self.raw_path).exists())
+
     def history_with_current(self) -> list[dict[str, str | int | None]]:
         """``superseded`` plus the current content: what a replacement must carry on."""
         if not self.ingested:

@@ -179,7 +179,7 @@ Counts refer to the file named. Three files were read in full: `ca-2026-01`
 | Problem | Evidence |
 | --- | --- |
 | **Naive `;` splitting breaks rows** | 5,645 rows in `ca-2026-01` and 609 in the four-week file contain a quoted `;`, for example an address complement written as `"LOTE: 04;"`. With a quote-aware parser every row has 16 fields. |
-| **CNPJ written two ways** | The samples all have a leading space and the mask (`; 01.492.748/0003-83;`). The two 2025-S2 semester files, read later, have 14 bare digits. After reducing to digits, all masks and check digits are valid. |
+| **CNPJ written two ways** | The samples all have a leading space and the mask (in the shape `; 11.222.333/0001-81;`; the example is not a real station). The two 2025-S2 semester files, read later, have 14 bare digits. After reducing to digits, all masks and check digits are valid. |
 | **Decimal comma, and integers without separator** | Every price uses a comma. In `glp-2004-01`, 39,955 rows hold a bare integer price such as `30`. |
 | **Purchase price empty** | 422,418 of 422,418 rows in `ca-2026-01`; 31,089 of 45,925 in `glp-2004-01`. |
 | **Exact duplicate rows** | 6 in `ca-2026-01`, none in the other samples. No duplicated (CNPJ, product, date) key had conflicting prices in the samples; the full history since 2020 has 4 such keys, all in `ca-2024-01` (section 1.8). |
