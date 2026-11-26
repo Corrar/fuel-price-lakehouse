@@ -102,10 +102,11 @@ Sizes of every file the collector would download for the full history, read
 on 2026-11-26 with `make extract SINCE=2004-01 ARGS=--dry-run` (one-byte range
 requests, nothing downloaded): 105 files, **4,813 MB**. That is 90 semester
 files, the 12 monthly files not yet covered by a semester file (July to October
-2026) and the 3 four-week files. Cumulative size by first year collected, with
-the time it takes at the 0.75 MB/s measured above:
+2026) and the 3 four-week files. Cumulative size by first year collected. The
+time column is arithmetic (size divided by the 0.75 MB/s measured above), not a
+timed download:
 
-| History starting in | Download | Time at 0.75 MB/s |
+| History starting in | Download | Estimated time at 0.75 MB/s |
 | --- | ---: | ---: |
 | 2026 | 96 MB | 2 min |
 | 2025 | 142 MB | 3 min |
@@ -116,18 +117,24 @@ the time it takes at the 0.75 MB/s measured above:
 | 2004 (everything) | 4,813 MB | 107 min |
 
 The years up to 2021 weigh much more because the automotive semester files were
-published as plain CSV (150 to 350 MB per year); from 2022 on they are zipped
-(about 45 to 56 MB per year, all groups).
+published as plain CSV: automotive and LPG together are 150 to 350 MB per year.
+From 2022 on the automotive files are zipped (about 45 to 56 MB per year, all
+groups).
+
+The history since 2020 was then downloaded in full on the same day: 41 ANP
+files and 14 yearly request windows of the two Banco Central series, 603.5 MB
+as served, 6,974,928 ANP rows, stored as 127 MB of raw Parquet.
 
 ### 1.4 File format
 
-Identical in every sample, from 2004 to November 2026, across semester,
+Identical in every sample but one (the encoding of one file, below), from 2004
+to November 2026, across semester,
 monthly and four-week files.
 
 | Property | Value |
 | --- | --- |
 | Container | Plain CSV, or a ZIP holding one CSV |
-| Encoding | UTF-8 **with BOM** |
+| Encoding | UTF-8 **with BOM**. One exception found so far: `dsas/ca/ca-2021-02.csv` is Windows-1252 without BOM (found when the history since 2020 was collected; the 15 files sampled before it were all UTF-8). |
 | Separator | `;` |
 | Line ending | CRLF |
 | Quoting | Only when a field contains `;` or `"`; inner quotes are doubled |
