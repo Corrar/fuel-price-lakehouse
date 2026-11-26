@@ -44,6 +44,17 @@ def layer_dir(layer: Layer, source: Source, root: Path = DEFAULT_DATA_ROOT) -> P
     return root / layer.value / source.value
 
 
+def manifest_path(root: Path = DEFAULT_DATA_ROOT) -> Path:
+    """The collection manifest: which raw files were already ingested."""
+    return root / "manifest" / "collection.jsonl"
+
+
+def safe_filename(name: str) -> str:
+    """``name`` reduced to characters that are safe as a single path component."""
+    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", name).strip("._")
+    return cleaned or "file"
+
+
 def partition_dir(
     layer: Layer,
     source: Source,

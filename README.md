@@ -9,8 +9,9 @@ files) and macroeconomic series from Banco Central do Brasil (JSON API), check
 their quality, quarantine the rows that break a rule, and publish
 analysis-ready Parquet tables together with a data quality report.
 
-> **Status: stage 0 of 5 — foundation.** The sources are documented and the
-> repository tooling is in place. Nothing is collected yet, so there are no
+> **Status: stage 1 of 5 — collection.** The pipeline can fetch the source
+> files incrementally into the raw layer and keeps a manifest of everything it
+> ingested. The data is not yet cleaned or validated, so there are no analysis
 > results to show. This section is updated as each stage lands.
 
 ## Roadmap
@@ -18,7 +19,7 @@ analysis-ready Parquet tables together with a data quality report.
 | Stage | Scope | Status |
 | --- | --- | --- |
 | 0 | Sources confirmed, repository foundation, storage decision | Done |
-| 1 | Incremental collection with a file manifest; raw layer | Not started |
+| 1 | Incremental collection with a file manifest; raw layer | Done |
 | 2 | Typed and normalised staged layer; validation rules; quarantine | Not started |
 | 3 | Curated tables for analysis | Not started |
 | 4 | Data quality report published on GitHub Pages | Not started |
@@ -46,6 +47,8 @@ ruff, GitHub Actions. No paid services.
 - [`docs/sources.md`](docs/sources.md) — what the two sources actually look
   like: URLs, formats, volumes, limits, licences and the data problems found
   in samples.
+- [`docs/collection.md`](docs/collection.md) — how the incremental collection
+  works: discovery, change detection, the manifest and failure handling.
 - [`docs/decisions/0001-storage-between-runs.md`](docs/decisions/0001-storage-between-runs.md)
   — where the data lives between runs, and why.
 
@@ -57,7 +60,12 @@ Requires [uv](https://docs.astral.sh/uv/).
 make install   # create the virtualenv from the lockfile
 make check     # lint + tests, the same thing CI runs
 make format    # auto-fix and format
+make collect   # fetch new or changed source files into data/raw
 ```
+
+`make collect` talks to the real sources. The first run downloads a few
+hundred megabytes; later runs only fetch what changed. Use
+`uv run fuel-lakehouse collect --dry-run` to see the plan first.
 
 ## Data sources
 
@@ -83,5 +91,7 @@ e séries do Banco Central (API SGS), conferir a qualidade, separar em
 quarentena as linhas que quebram alguma regra e publicar tabelas prontas para
 análise, com um relatório de qualidade.
 
-**Situação: etapa 0 de 5 — base.** As fontes estão documentadas e a estrutura
-do repositório está pronta. Ainda não há coleta nem resultados.
+**Situação: etapa 1 de 5 — coleta.** O pipeline já busca os arquivos das fontes
+de forma incremental para a camada bruta e mantém um registro de tudo o que
+coletou. Os dados ainda não são tratados nem validados, então não há
+resultados de análise.

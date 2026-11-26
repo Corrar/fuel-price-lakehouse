@@ -281,7 +281,8 @@ Two traps:
 - **Error bodies have four different shapes** (`error`/`message`/`syntax` for
   406; `erro.detail` for 400 and 404; `erro` as a plain string for a bad date;
   plain text for an unknown series). Errors should be classified by status
-  code, not by parsing the body.
+  code, not by parsing the body; the one exception is 404, where the content
+  type separates "no data" (JSON) from "no such series" (plain text).
 
 The description on the open data portal states the same limits ("A diferença
 entre dataFinal e dataInicial não deve ser superior a 10 anos", last N values
