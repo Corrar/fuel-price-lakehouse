@@ -225,11 +225,11 @@ def _collect_file(
         download = fetcher.download(file.url, downloaded)
         if previous is not None and previous.sha256 == download.sha256:
             # Same content after all. Remember the new hint so it is not fetched again.
-            previous.details = file.details
+            previous.details = {**previous.details, **file.details}
             return Outcome(file.url, "unchanged", download.size_bytes, detail="same hash")
         collected_at = now()
         destination = raw_path(file, root)
-        rows = write_anp_csv(
+        copy = write_anp_csv(
             downloaded, destination, Provenance(file.url, download.sha256, collected_at)
         )
     finally:
@@ -244,14 +244,19 @@ def _collect_file(
             collected_at=collected_at.isoformat(),
             size_bytes=download.size_bytes,
             sha256=download.sha256,
-            rows=rows,
+            rows=copy.rows,
             raw_path=destination.relative_to(root).as_posix(),
             revision=(record.revision if record else 0) + 1,
-            details=file.details,
+            details={
+                **file.details,
+                "encoding": copy.encoding,
+                "csv_parsing": "lenient" if copy.lenient else "strict",
+            },
+            superseded=previous.history_with_current() if previous is not None else [],
         )
     )
     action = "updated" if previous is not None else "new"
-    return Outcome(file.url, action, download.size_bytes, rows, f"{rows:,} rows")
+    return Outcome(file.url, action, download.size_bytes, copy.rows, f"{copy.rows:,} rows")
 
 
 class _LandingPage(HTMLParser):

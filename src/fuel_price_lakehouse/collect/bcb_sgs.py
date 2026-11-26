@@ -20,6 +20,8 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from pathlib import Path
 
+import httpx
+
 from fuel_price_lakehouse.collect.http import Fetcher, SourceError, TransientError
 from fuel_price_lakehouse.collect.manifest import FileRecord, Manifest, Outcome
 from fuel_price_lakehouse.collect.raw import CorruptFileError, Provenance, write_json_records
@@ -148,6 +150,19 @@ def _has_rows(manifest: Manifest, code: int) -> bool:
     return any(key.startswith(prefix) and (r.rows or 0) > 0 for key, r in manifest.files.items())
 
 
+def _is_empty_window(response: httpx.Response) -> bool:
+    """Tell "no observations in this window" apart from "no such series".
+
+    Both are a 404. The first comes as JSON; the second as plain text ("A serie
+    nao existe!"), which must fail loudly instead of being stored as an empty year.
+    """
+    if response.status_code != 404:
+        return False
+    if "json" not in response.headers.get("Content-Type", ""):
+        raise SourceError(f"{response.request.url}: HTTP 404 and not JSON: unknown series?")
+    return True
+
+
 def _collect_window(
     fetcher: Fetcher,
     manifest: Manifest,
@@ -164,8 +179,7 @@ def _collect_window(
     if response.status_code == 304:
         return Outcome(window.key, "unchanged", detail="not modified")
 
-    # 404 is how the API says "no observations in this window".
-    body = b"[]" if response.status_code == 404 else response.content
+    body = b"[]" if _is_empty_window(response) else response.content
     sha256 = hashlib.sha256(body).hexdigest()
     new_etag = response.headers.get("ETag", "")
     if previous is not None and previous.sha256 == sha256:
@@ -192,6 +206,7 @@ def _collect_window(
             raw_path=destination.relative_to(root).as_posix() if rows else None,
             revision=(record.revision if record else 0) + 1,
             details={"series": str(window.code), "year": str(window.start.year), "etag": new_etag},
+            superseded=previous.history_with_current() if previous is not None else [],
         )
     )
     action = "updated" if previous is not None else "new"

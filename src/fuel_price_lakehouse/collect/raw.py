@@ -28,8 +28,10 @@ import pyarrow.parquet as pq
 
 _BATCH_ROWS = 50_000
 
-# ANP files are UTF-8 with BOM, ";"-separated, quoted only where needed.
-_ANP_ENCODING = "utf-8-sig"
+# ANP files are ";"-separated, quoted only where needed, and UTF-8 with BOM,
+# except for a few that are Windows-1252. Encodings are tried in this order.
+_ANP_ENCODINGS = ("utf-8-sig", "cp1252")
+_ENCODING_NAMES = {"utf-8-sig": "utf-8", "cp1252": "cp1252"}
 _ANP_DELIMITER = ";"
 
 
@@ -46,31 +48,66 @@ class Provenance:
     collected_at: datetime
 
 
-def write_anp_csv(downloaded: Path, destination: Path, provenance: Provenance) -> int:
+@dataclass(frozen=True)
+class CsvCopy:
+    """How an ANP file was read. Recorded in the manifest next to the file."""
+
+    rows: int
+    encoding: str
+    """``utf-8`` for almost every file; ``cp1252`` for the few published in it."""
+    lenient: bool
+    """True when the strict CSV reader refused the file and the lenient one was used."""
+
+
+def write_anp_csv(downloaded: Path, destination: Path, provenance: Provenance) -> CsvCopy:
     """Copy an ANP file (plain CSV, or a ZIP holding one CSV) to Parquet.
 
-    Returns the number of data rows. Besides the common tracking columns, two
-    more keep rows with an unexpected number of fields lossless instead of
-    rejecting or silently reshaping them:
+    Besides the common tracking columns, two more keep rows with an unexpected
+    number of fields lossless instead of rejecting or silently reshaping them:
 
     - ``_field_count``: fields found in the row;
     - ``_extra_fields``: the fields beyond the header, when there are any.
       A row with fewer fields than the header has nulls in the missing columns
       (an empty field in the file is an empty string, never null).
+
+    Two things vary between files and are handled here rather than failing the
+    whole file, because one odd file must not stop twenty years of history:
+
+    - encoding: UTF-8 is tried first; a file that is not valid UTF-8 (the
+      second semester of 2021 is one) is read as Windows-1252;
+    - quoting: the strict CSV reader is tried first; if a file has malformed
+      quoting the lenient reader is used, and any row it splits into the wrong
+      number of fields is visible through ``_field_count``.
+
+    Which path was taken is returned, and ends up in the manifest.
     """
-    with _open_csv_bytes(downloaded) as stream:
-        text = io.TextIOWrapper(stream, encoding=_ANP_ENCODING, newline="")
-        # strict: malformed quoting is an error, not something to guess around.
-        reader = csv.reader(text, delimiter=_ANP_DELIMITER, strict=True)
+    failure: Exception | None = None
+    for encoding in _ANP_ENCODINGS:
         try:
-            header = _checked_header(next(reader, None), downloaded)
-            schema = _schema(
-                header,
-                [pa.field("_field_count", pa.int32()), pa.field("_extra_fields", pa.string())],
-            )
-            return _write(destination, schema, _anp_batches(reader, header), provenance)
-        except (UnicodeDecodeError, csv.Error) as error:
-            raise CorruptFileError(f"{downloaded.name}: not a readable CSV: {error}") from error
+            for strict in (True, False):
+                try:
+                    rows = _copy_csv(downloaded, destination, provenance, encoding, strict)
+                    return CsvCopy(rows, _ENCODING_NAMES[encoding], lenient=not strict)
+                except csv.Error as error:
+                    failure = error
+            break  # both readers failed: another encoding will not help
+        except UnicodeDecodeError as error:
+            failure = error
+    raise CorruptFileError(f"{downloaded.name}: not a readable CSV: {failure}") from failure
+
+
+def _copy_csv(
+    downloaded: Path, destination: Path, provenance: Provenance, encoding: str, strict: bool
+) -> int:
+    with _open_csv_bytes(downloaded) as stream:
+        text = io.TextIOWrapper(stream, encoding=encoding, newline="")
+        reader = csv.reader(text, delimiter=_ANP_DELIMITER, strict=strict)
+        header = _checked_header(next(reader, None), downloaded)
+        schema = _schema(
+            header,
+            [pa.field("_field_count", pa.int32()), pa.field("_extra_fields", pa.string())],
+        )
+        return _write(destination, schema, _anp_batches(reader, header), provenance)
 
 
 def write_json_records(body: bytes, destination: Path, provenance: Provenance) -> int:

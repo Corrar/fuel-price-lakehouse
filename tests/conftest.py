@@ -115,6 +115,7 @@ class FakeWeb:
         self.failures: dict[str, list[BaseException | int]] = {}
         """Queued per URL: an exception to raise or a status to answer, once each."""
         self.truncate: set[str] = set()
+        self.unknown_series: set[int] = set()
         self.requests: list[tuple[str, str]] = []
         """(kind, url) with kind in ``page``, ``probe``, ``download``, ``sgs``."""
 
@@ -159,6 +160,8 @@ class FakeWeb:
     def _sgs(self, request: httpx.Request, url: str) -> httpx.Response:
         self.requests.append(("sgs", url))
         match = re.search(r"sgs\.(\d+)/dados\?formato=json&dataInicial=01/01/(\d{4})", url)
+        if int(match.group(1)) in self.unknown_series:
+            return httpx.Response(404, text="A serie nao existe!")
         body = self.sgs.get((int(match.group(1)), int(match.group(2))))
         if body is None:
             return httpx.Response(404, json={"erro": {"detail": "Value(s) not found"}})

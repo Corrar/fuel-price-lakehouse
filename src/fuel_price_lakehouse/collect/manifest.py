@@ -40,6 +40,10 @@ class FileRecord:
     """How many different contents were ingested from this URL. Above 1: republished."""
     details: dict[str, str] = field(default_factory=dict)
     """Source-specific attributes (period, fuel group, ETag, ...)."""
+    superseded: list[dict[str, str | int | None]] = field(default_factory=list)
+    """Earlier contents of this URL, oldest first: SHA-256, size, rows and when
+    each was collected. The raw file holds only the current content; this is
+    the audit trail of what the source republished."""
     last_error: str | None = None
     """Latest failure. A record can be ``ok`` and carry an error: the previous
     content is still valid and the next run tries the new one again."""
@@ -48,6 +52,18 @@ class FileRecord:
     @property
     def ingested(self) -> bool:
         return self.status == "ok" and self.sha256 is not None
+
+    def history_with_current(self) -> list[dict[str, str | int | None]]:
+        """``superseded`` plus the current content: what a replacement must carry on."""
+        if not self.ingested:
+            return list(self.superseded)
+        current: dict[str, str | int | None] = {
+            "sha256": self.sha256,
+            "size_bytes": self.size_bytes,
+            "rows": self.rows,
+            "collected_at": self.collected_at,
+        }
+        return [*self.superseded, current]
 
 
 @dataclass(frozen=True)

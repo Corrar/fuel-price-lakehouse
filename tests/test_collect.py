@@ -250,6 +250,52 @@ def test_corrupt_republication_keeps_the_previous_good_version(web, tmp_path, fa
     assert pq.read_table(tmp_path / record["raw_path"]).num_rows == 2
 
 
+def test_file_in_windows_1252_is_read_and_the_encoding_recorded(web, tmp_path, fast):
+    # ANP published at least one file (2021-S2) in Windows-1252 instead of UTF-8.
+    text = (
+        HEADER + "\r\nSE;SP;SAO PAULO;POSTO SÃO JOÃO;x;RUA;1;;;;GLP;05/10/2026;110,00;;u;BRANCA\r\n"
+    )
+    web.files[OCTOBER_LPG] = text.encode("cp1252")
+    run(web, tmp_path, fast)
+
+    record = manifest(tmp_path)[OCTOBER_LPG]
+    assert record["details"]["encoding"] == "cp1252"
+    row = pq.read_table(tmp_path / record["raw_path"]).to_pylist()[0]
+    assert row["Revenda"] == "POSTO SÃO JOÃO"
+    assert manifest(tmp_path)[OCTOBER_DIESEL]["details"]["encoding"] == "utf-8"
+
+
+def test_malformed_quoting_falls_back_to_the_lenient_reader(web, tmp_path, fast):
+    # A quote closed in the middle of a field is an error for the strict reader.
+    bad = '"AV "BRASIL" 100"'
+    body = (
+        "\ufeff" + HEADER + f"\r\nSE;SP;SAO PAULO;POSTO;x;{bad};1;;;;GLP;05/10/2026;110,00;;u;B\r\n"
+    )
+    web.files[OCTOBER_LPG] = body.encode()
+    run(web, tmp_path, fast)
+
+    record = manifest(tmp_path)[OCTOBER_LPG]
+    assert record["status"] == "ok"
+    assert record["details"]["csv_parsing"] == "lenient"
+    assert record["rows"] == 1
+    assert manifest(tmp_path)[OCTOBER_DIESEL]["details"]["csv_parsing"] == "strict"
+
+
+def test_republication_keeps_an_audit_trail_of_earlier_versions(web, tmp_path, fast):
+    run(web, tmp_path, fast)
+    first = manifest(tmp_path)[OCTOBER_DIESEL]
+    web.files[OCTOBER_DIESEL] = anp_csv("6,01", "6,02", "6,03")
+    run(web, tmp_path, fast)
+    web.files[OCTOBER_DIESEL] = anp_csv("6,01", "6,02", "6,03", "6,04")
+    run(web, tmp_path, fast)
+
+    record = manifest(tmp_path)[OCTOBER_DIESEL]
+    assert record["revision"] == 3
+    assert [version["rows"] for version in record["superseded"]] == [2, 3]
+    assert record["superseded"][0]["sha256"] == first["sha256"]
+    assert record["superseded"][0]["collected_at"] == first["collected_at"]
+
+
 def test_zip_member_is_read_by_position_whatever_its_name(web, tmp_path, fast):
     web.files[SEMESTER_ZIP] = zipped(anp_csv("5,99"), name="qualquer coisa.dat")
     run(web, tmp_path, fast, since=date(2026, 1, 1))
@@ -327,6 +373,15 @@ def test_sgs_unknown_series_is_not_mistaken_for_empty_windows(web, tmp_path, fas
 
     assert actions(outcomes)["bcb_sgs/433"] == "failed"
     assert actions(outcomes)["bcb_sgs/1/2026"] == "new"
+
+
+def test_sgs_404_that_is_not_json_means_the_series_does_not_exist(web, tmp_path, fast):
+    web.unknown_series.add(433)
+    outcomes = run(web, tmp_path, fast, sources=["bcb_sgs"])
+
+    assert actions(outcomes)["bcb_sgs/433/2026"] == "failed"
+    assert "unknown series" in manifest(tmp_path)["bcb_sgs/433/2026"]["last_error"]
+    assert manifest(tmp_path)["bcb_sgs/433/2026"]["status"] == "failed"
 
 
 def test_sgs_second_run_revalidates_with_etag_and_writes_nothing(web, tmp_path, fast):
