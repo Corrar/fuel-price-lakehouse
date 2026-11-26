@@ -13,8 +13,10 @@ either exists complete or does not exist.
 from __future__ import annotations
 
 import csv
+import hashlib
 import io
 import json
+import re
 import zipfile
 from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
@@ -32,6 +34,8 @@ _BATCH_ROWS = 50_000
 # UTF-8 with a BOM; a few have no BOM and are Windows-1252.
 _UTF8_BOM = b"\xef\xbb\xbf"
 _ZIP_MAGIC = b"PK\x03\x04"
+_NON_ASCII = re.compile(rb"[\x80-\xff]")
+_UTF8_SEQUENCE = re.compile(rb"[\xc2-\xdf][\x80-\xbf]|[\xe0-\xef][\x80-\xbf]{2}")
 _ENCODING_NAMES = {"utf-8-sig": "utf-8", "utf-8": "utf-8", "cp1252": "cp1252"}
 _ANP_DELIMITER = ";"
 
@@ -76,13 +80,16 @@ def write_anp_csv(downloaded: Path, destination: Path, provenance: Provenance) -
 
     - encoding: a UTF-8 BOM settles it. Without one, UTF-8 is tried first and
       Windows-1252 second (the second semester of 2021 is such a file). A file
-      that announces UTF-8 with a BOM and then is not valid UTF-8 is corrupt:
-      reading it as something else would turn its accents into noise.
+      that is mostly UTF-8 but has a damaged byte is corrupt, BOM or not:
+      reading it as Windows-1252 would turn every accent into noise. The tell
+      is in the bytes: Portuguese text in Windows-1252 practically never
+      contains a valid UTF-8 multi-byte sequence (the real 2021 file has none
+      in 77,782 non-ASCII bytes), while a damaged UTF-8 file is mostly made of them.
     - quoting: the strict CSV reader is tried first; if a file has malformed
       quoting the lenient reader is used, and any row it splits into the wrong
-      number of fields is visible through ``_field_count``. The lenient reader
-      is not allowed to swallow line breaks into a field, which is how an
-      unclosed quote silently merges rows; that fails the file instead.
+      number of fields is visible through ``_field_count``. Neither reader is
+      allowed to swallow a line break into a field, which is how stray quotes
+      silently merge rows; that fails the file instead.
 
     Which path was taken is returned, and ends up in the manifest.
     """
@@ -99,7 +106,18 @@ def write_anp_csv(downloaded: Path, destination: Path, provenance: Provenance) -
             break  # both readers failed: another encoding will not help
         except UnicodeDecodeError as error:
             failure = error
+            if encoding == "utf-8" and _mostly_utf8(downloaded):
+                break  # damaged UTF-8, not Windows-1252
     raise CorruptFileError(f"{downloaded.name}: not a readable CSV: {failure}") from failure
+
+
+def _mostly_utf8(downloaded: Path) -> bool:
+    """Whether most non-ASCII bytes of the file form valid UTF-8 sequences."""
+    with _open_csv_bytes(downloaded) as stream:
+        content = stream.read()
+    non_ascii = len(_NON_ASCII.findall(content))
+    in_sequences = sum(len(match) for match in _UTF8_SEQUENCE.findall(content))
+    return non_ascii > 0 and in_sequences > non_ascii / 2
 
 
 def _starts_with_bom(downloaded: Path) -> bool:
@@ -113,8 +131,10 @@ def _copy_csv(
     with _open_csv_bytes(downloaded) as stream:
         text = io.TextIOWrapper(stream, encoding=encoding, newline="")
         reader: Iterator[list[str]] = csv.reader(text, delimiter=_ANP_DELIMITER, strict=strict)
-        if not strict:
-            reader = _without_merged_lines(reader, downloaded)
+        # ANP fields never span lines. A field that does is two quotes that do
+        # not belong together, and both readers would silently merge the rows
+        # between them.
+        reader = _without_merged_lines(reader, downloaded)
         header = _checked_header(next(reader, None), downloaded)
         schema = _schema(
             header,
@@ -130,6 +150,15 @@ def _without_merged_lines(rows: Iterator[list[str]], path: Path) -> Iterator[lis
                 f"{path.name}: unbalanced quote near record {number}: lines would be merged"
             )
         yield row
+
+
+def file_sha256(path: Path) -> str:
+    """SHA-256 of a file on disk, read in chunks."""
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        while chunk := stream.read(1024 * 1024):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def write_json_records(body: bytes, destination: Path, provenance: Provenance) -> int:

@@ -38,6 +38,9 @@ class FileRecord:
     """Raw Parquet file, relative to the data root. ``None`` when there are no rows."""
     landing_path: str | None = None
     """The downloaded bytes in the landing zone, relative to the data root."""
+    raw_file_sha256: str | None = None
+    """SHA-256 of the raw Parquet file. It changes when the raw file is rebuilt
+    from the landing zone, which is how the staging step knows to redo it."""
     revision: int = 0
     """How many different contents were ingested from this URL. Above 1: republished."""
     details: dict[str, str] = field(default_factory=dict)

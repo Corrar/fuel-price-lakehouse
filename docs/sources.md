@@ -256,7 +256,7 @@ the collected data. These are the facts the staged and curated layers rely on.
 | **Averages** | A municipality's average is a simple mean of its stations (reproduced for 2,493 of 2,494 municipality-products of one week). ANP's state and national averages are weighted by sales volume, which is not in the open data. **This project publishes simple means over surveyed stations, so its state and national figures differ slightly from ANP's bulletins.** | the collected data, compared with ANP's weekly summary |
 | **`Valor de Compra`** | The distribution price paid by the station. "Série disponível até agosto de 2020"; the last value in the data is dated 17/08/2020. | [metadata PDF](https://www.gov.br/anp/pt-br/centrais-de-conteudo/dados-abertos/arquivos/shpc/metadados-serie-historica-precos-combustiveis-1.pdf) |
 | **`Bandeira` = `BRANCA`** | A station that "opta por não exibir marca comercial de nenhuma distribuidora" (white-flag, unbranded). | metadata PDF |
-| **Products** | `GASOLINA ADITIVADA` appears from 19/10/2020. Prices are cash prices; three decimal places were legitimate until May 2022. | survey information page; the collected data |
+| **Products** | `GASOLINA ADITIVADA` appears from 19/10/2020. Prices are cash prices. Prices with three decimal places are the majority in 2020 and 2021, disappear in the first half of 2022, come back in 2,920 rows between July and 13 September 2022, and do not occur after that. | survey information page; the collected data |
 | **Ethanol rule of thumb** | Ethanol "só é economicamente vantajoso […] quando o preço deste representar 70% ou menos do valor da gasolina comum". No more recent ANP statement was found, and gasoline now carries more ethanol than in 2016, so the dashboard presents it as a rule of thumb. | [ANP, Boletim Anual de Preços 2016, p. 66](https://www.gov.br/anp/pt-br/assuntos/precos-e-defesa-da-concorrencia/precos/arquivos-boletim-anual-de-precos/boletim-2016.pdf) |
 
 Found while profiling the history since 2020 (6,974,928 rows in 41 files):
@@ -442,5 +442,5 @@ Decisions the measurements above force on the later stages.
 | Station names drift for the same CNPJ | CNPJ is the station key; names are attributes. |
 | SGS daily series limited to 10 years per request | Fetch in windows of at most 10 years; monthly series in one request. |
 | SGS returns 404 for an empty window | Treat 404 "Value(s) not found" as "no data", not as an error. |
-| SGS values are strings | Parse explicitly to decimal; never rely on JSON typing. |
+| SGS values are strings | Parse the text explicitly, with the dot as decimal mark and negative values allowed (IPCA has negative months); never rely on JSON typing. |
 | SGS daily series skip non-business days | Join fuel prices to the latest available rate on or before the date. |
