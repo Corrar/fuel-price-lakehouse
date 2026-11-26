@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help install lint format test check clean
+.PHONY: help install lint format test check collect clean
 
 help: ## Show available targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "} {printf "  %-10s %s\n", $$1, $$2}'
@@ -19,6 +19,9 @@ test: ## Run the test suite
 	uv run pytest
 
 check: lint test ## Everything CI runs
+
+collect: ## Fetch new or changed source files into data/raw
+	uv run fuel-lakehouse collect
 
 clean: ## Remove caches and build output (never touches data/)
 	rm -rf .pytest_cache .ruff_cache dist build
