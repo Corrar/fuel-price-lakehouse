@@ -1,0 +1,195 @@
+"""Banco Central collector: SGS time series, fetched as JSON in date windows.
+
+Limits measured on the live API (see ``docs/sources.md``):
+
+- daily series need ``dataInicial`` and accept at most 10 years per request;
+- a window with no observations answers 404, not an empty list;
+- JSON responses carry an ``ETag`` and honour ``If-None-Match``.
+
+Each series is requested one calendar year at a time. Fixed windows give every
+request a stable identity in the manifest: a year that is over and was fetched
+a while after its end is never requested again, and the current year is revalidated
+with its ETag, which costs a 304 when nothing was published.
+"""
+
+from __future__ import annotations
+
+import hashlib
+from collections.abc import Callable
+from dataclasses import dataclass
+from datetime import date, datetime, timedelta
+from pathlib import Path
+
+from fuel_price_lakehouse.http import Fetcher, SourceError, TransientError
+from fuel_price_lakehouse.layout import Layer, Source, partition_dir
+from fuel_price_lakehouse.manifest import FileRecord, Manifest, Outcome
+from fuel_price_lakehouse.raw import CorruptFileError, Provenance, write_json_records
+
+API = "https://api.bcb.gov.br/dados/serie/bcdata.sgs.{code}/dados"
+DATASET = "series"
+
+MAX_WINDOW_YEARS = 10
+"""Longest window the API accepts for a daily series (406 beyond it)."""
+WINDOW_YEARS = 1
+
+SETTLE_DAYS = 45
+"""A year is final only this long after it ends: December's IPCA comes out in
+January, so a window fetched right at the turn of the year is still incomplete."""
+
+
+@dataclass(frozen=True)
+class Series:
+    code: int
+    name: str
+
+
+SERIES = (
+    Series(1, "Taxa de câmbio - Livre - Dólar americano (venda) - diário"),
+    Series(433, "Índice nacional de preços ao consumidor-amplo (IPCA)"),
+)
+
+
+@dataclass(frozen=True)
+class Window:
+    code: int
+    start: date
+    end: date
+
+    def __post_init__(self) -> None:
+        if self.end.year - self.start.year >= MAX_WINDOW_YEARS:
+            raise ValueError(f"window {self.start}..{self.end} exceeds the API limit")
+
+    @property
+    def key(self) -> str:
+        return f"{Source.BCB_SGS}/{self.code}/{self.start.year}"
+
+    @property
+    def url(self) -> str:
+        # The API only accepts dd/MM/yyyy; ISO dates are a 400.
+        return (
+            f"{API.format(code=self.code)}?formato=json"
+            f"&dataInicial={self.start:%d/%m/%Y}&dataFinal={self.end:%d/%m/%Y}"
+        )
+
+
+def windows(code: int, since: date, today: date) -> list[Window]:
+    """Calendar-year windows from the year of ``since`` to the current year."""
+    return [
+        Window(code, date(year, 1, 1), date(year + WINDOW_YEARS - 1, 12, 31))
+        for year in range(since.year, today.year + 1, WINDOW_YEARS)
+    ]
+
+
+def raw_path(window: Window, root: Path) -> Path:
+    directory = partition_dir(
+        Layer.RAW, Source.BCB_SGS, DATASET, root, series=window.code, year=window.start.year
+    )
+    return directory / "data.parquet"
+
+
+def collect(
+    fetcher: Fetcher,
+    manifest: Manifest,
+    root: Path,
+    since: date,
+    *,
+    now: Callable[[], datetime],
+    series: tuple[Series, ...] = SERIES,
+    dry_run: bool = False,
+    full_check: bool = False,
+    log: Callable[[str], None] = print,
+) -> list[Outcome]:
+    """Bring the raw layer up to date with the SGS API."""
+    outcomes = []
+    for one in series:
+        results = []
+        for window in windows(one.code, since, now().date()):
+            record = manifest.get(window.key)
+            if not full_check and _settled(record, window):
+                outcome = Outcome(window.key, "unchanged")
+            elif dry_run:
+                outcome = Outcome(window.key, "planned")
+            else:
+                try:
+                    outcome = _collect_window(fetcher, manifest, root, window, now, full_check)
+                    _mark_if_settled(manifest.get(window.key), window, now().date())
+                except (TransientError, SourceError, CorruptFileError) as error:
+                    at = now().isoformat()
+                    manifest.record_failure(
+                        window.key, Source.BCB_SGS, window.url, str(error), at, {}
+                    )
+                    outcome = Outcome(window.key, "failed", detail=str(error))
+                manifest.save()
+            results.append(outcome)
+            log(f"bcb_sgs: {outcome.action:9} {window.key} {outcome.detail}")
+        if not dry_run and not _has_rows(manifest, one.code):
+            # An unknown series code answers 404 exactly like an empty window does.
+            detail = "no data in any window: check the series code"
+            results.append(Outcome(f"{Source.BCB_SGS}/{one.code}", "failed", detail=detail))
+            log(f"bcb_sgs: failed    series {one.code} {detail}")
+        outcomes.extend(results)
+    return outcomes
+
+
+def _settled(record: FileRecord | None, window: Window) -> bool:
+    return record is not None and record.ingested and record.details.get("settled") == "yes"
+
+
+def _mark_if_settled(record: FileRecord | None, window: Window, today: date) -> None:
+    """Flag a window checked late enough after its end: it is never requested again."""
+    if record is not None and record.ingested and today >= window.end + timedelta(days=SETTLE_DAYS):
+        record.details["settled"] = "yes"
+
+
+def _has_rows(manifest: Manifest, code: int) -> bool:
+    prefix = f"{Source.BCB_SGS}/{code}/"
+    return any(key.startswith(prefix) and (r.rows or 0) > 0 for key, r in manifest.files.items())
+
+
+def _collect_window(
+    fetcher: Fetcher,
+    manifest: Manifest,
+    root: Path,
+    window: Window,
+    now: Callable[[], datetime],
+    full_check: bool,
+) -> Outcome:
+    record = manifest.get(window.key)
+    known = record is not None and record.ingested
+    etag = record.details.get("etag", "") if known else ""
+    headers = {"If-None-Match": etag} if etag and not full_check else None
+    response = fetcher.get(window.url, headers=headers, allowed=(200, 304, 404))
+    if response.status_code == 304:
+        return Outcome(window.key, "unchanged", detail="not modified")
+
+    # 404 is how the API says "no observations in this window".
+    body = b"[]" if response.status_code == 404 else response.content
+    sha256 = hashlib.sha256(body).hexdigest()
+    new_etag = response.headers.get("ETag", "")
+    if known and record.sha256 == sha256:
+        record.details["etag"] = new_etag
+        return Outcome(window.key, "unchanged", len(body), detail="same hash")
+    if response.status_code == 404 and known and record.rows:
+        raise SourceError(f"{window.url}: had {record.rows} rows, now reports no data")
+
+    collected_at = now()
+    destination = raw_path(window, root)
+    rows = write_json_records(body, destination, Provenance(window.url, sha256, collected_at))
+    if rows == 0:
+        destination.unlink()
+    manifest.put(
+        FileRecord(
+            key=window.key,
+            source=Source.BCB_SGS,
+            url=window.url,
+            status="ok",
+            collected_at=collected_at.isoformat(),
+            size_bytes=len(body),
+            sha256=sha256,
+            rows=rows,
+            raw_path=destination.relative_to(root).as_posix() if rows else None,
+            revision=(record.revision if record else 0) + 1,
+            details={"series": str(window.code), "year": str(window.start.year), "etag": new_etag},
+        )
+    )
+    return Outcome(window.key, "updated" if known else "new", len(body), rows, f"{rows:,} rows")

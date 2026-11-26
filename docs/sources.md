@@ -98,6 +98,27 @@ Sizes as served (compressed for `.zip`), read from response headers.
 - Row counts of the files downloaded in full: `ca-2026-01` 422,418 rows;
   last-four-weeks gasoline-ethanol 47,769 rows; `glp-2004-01` 45,925 rows.
 
+Sizes of every file the collector would download for the full history, read
+on 2026-11-26 with `make extract SINCE=2004-01 ARGS=--dry-run` (one-byte range
+requests, nothing downloaded): 105 files, **4,813 MB**. That is 90 semester
+files, the 12 monthly files not yet covered by a semester file (July to October
+2026) and the 3 four-week files. Cumulative size by first year collected, with
+the time it takes at the 0.75 MB/s measured above:
+
+| History starting in | Download | Time at 0.75 MB/s |
+| --- | ---: | ---: |
+| 2026 | 96 MB | 2 min |
+| 2025 | 142 MB | 3 min |
+| 2023 | 242 MB | 5 min |
+| 2020 | 603 MB | 13 min |
+| 2015 | 1,658 MB | 37 min |
+| 2010 | 3,045 MB | 68 min |
+| 2004 (everything) | 4,813 MB | 107 min |
+
+The years up to 2021 weigh much more because the automotive semester files were
+published as plain CSV (150 to 350 MB per year); from 2022 on they are zipped
+(about 45 to 56 MB per year, all groups).
+
 ### 1.4 File format
 
 Identical in every sample, from 2004 to November 2026, across semester,
@@ -168,21 +189,40 @@ malformed CEP, wrong field counts (with a proper CSV parser), unexpected units.
 
 ### 1.6 Licence
 
-- Neither the landing page body nor the metadata PDF states a licence for the
-  dataset.
-- The only licence text is the site-wide footer of the page: "Todo o conteúdo
-  deste site está publicado sob a licença Creative Commons
-  Atribuição-SemDerivações 3.0 Não Adaptada" (CC BY-ND 3.0).
-- Whether that footer governs the data files is **not stated**. Until this is
-  settled, the project credits ANP as the source and treats redistribution of
-  transformed data as an open question. See "To confirm".
-- Source and contact given in the PDF: "ANP/SDC (Superintendência de Defesa da
-  Concorrência)", `sdc@anp.gov.br`.
+Checked again on **2026-11-26**, looking for a licence declared for the dataset
+itself rather than for the website.
+
+| Where | What it says |
+| --- | --- |
+| Landing page body and metadata PDF | No licence. |
+| Landing page footer | "Todo o conteúdo deste site está publicado sob a licença Creative Commons Atribuição-SemDerivações 3.0 Não Adaptada" (CC BY-ND 3.0). Site-wide text; it does not mention the data files. |
+| ANP open data page (<https://www.gov.br/anp/pt-br/centrais-de-conteudo/dados-abertos>) | No licence. |
+| ANP Open Data Plan 2026-2028 (<https://www.gov.br/anp/pt-br/centrais-de-conteudo/dados-abertos/arquivos/home/pda-2026-2028.pdf>) | No occurrence of "licença", Creative Commons or ODbL. It cites Decreto 8.777/2016 and lists encouraging reuse ("estímulo ao reúso") as a goal. |
+| Federal open data portal, dados.gov.br | **Could not be read.** The dataset page is rendered by JavaScript and the public API answered 401 without a key. The licence field of the record is therefore unknown. |
+| Third-party copy of the old dados.gov.br record (<https://data.amerigeoss.org/api/3/action/package_show?id=serie-historica-de-precos-de-combustiveis-por-revenda>) | `license_id: cc-by`, "Creative Commons Attribution", author ANP. Second-hand, undated, no CC version. Not evidence of the current terms. |
+| Decreto 8.777/2016, federal open data policy (<https://www.planalto.gov.br/ccivil_03/_ato2015-2018/2016/decreto/d8777.htm>) | Art. 2º III defines open data as published "sob licença aberta que permita sua livre utilização, consumo ou cruzamento, limitando-se a creditar a autoria ou a fonte". Art. 3º IV: "permissão irrestrita de reuso das bases de dados publicadas em formato aberto". Art. 4º: "Os dados disponibilizados pelo Poder Executivo federal e as informações de transparência ativa são de livre utilização pelos Poderes Públicos e pela sociedade." |
+
+Conclusion:
+
+- **No licence is explicitly declared for this dataset** in any official source
+  that could be read.
+- The strongest documented basis for reuse with attribution is Decreto
+  8.777/2016, which ANP itself invokes for its open data. The only contrary
+  signal is the site footer (CC BY-ND, "no derivatives"), which reads as
+  covering the website content.
+- This is a reading of public documents, not legal advice, and the one place
+  where a licence would normally be declared (the dados.gov.br record) is still
+  unread.
+
+What the project does meanwhile: **no ANP data is published by this
+repository.** The pipeline collects and processes locally; nothing derived from
+ANP files is uploaded as a release asset until the owner decides. The source is
+always credited as "ANP — Série Histórica de Preços de Combustíveis". Source
+and contact given in the metadata PDF: "ANP/SDC (Superintendência de Defesa da
+Concorrência)", `sdc@anp.gov.br`.
 
 ### 1.7 To confirm
 
-- Sizes of the other 32 automotive and 43 LPG semester files, and of 134 of the
-  138 monthly files; therefore the total size of the full history.
 - Contents of the semester files for the years not sampled (even years
   2006–2020, and the CSVs inside the 2022–2025 ZIPs).
 - Full-file statistics for old automotive files, for the four-week diesel-CNG
@@ -193,8 +233,8 @@ malformed CEP, wrong field counts (with a proper CSV parser), unexpected units.
   There are no validators, and this was a single observation.
 - The actual weekday of the weekly update. Only one "atualizado em" stamp was
   seen (23/11/2026, a Monday).
-- Whether CC BY-ND 3.0 applies to the data files, and whether a separate open
-  data record with an explicit licence exists.
+- The licence field of the dataset record on dados.gov.br (needs a browser or
+  an API key), or a written answer from ANP (`sdc@anp.gov.br`).
 - Behaviour under parallel or high-volume requests.
 
 ---
@@ -322,6 +362,10 @@ entre dataFinal e dataInicial não deve ser superior a 10 anos", last N values
   (<https://dadosabertos.bcb.gov.br/dataset/1-taxa-de-cambio---livre---dolar-americano-venda---diario>)
   states "Open Data Commons Open Database License (ODbL)". The portal's
   metadata gives the same licence for series 1, 10813, 432 and 11.
+- Checked again on 2026-11-26 through the portal's catalogue API
+  (<https://dadosabertos.bcb.gov.br/api/3/action/package_search>): 4,260 of its
+  4,261 datasets are tagged ODbL, including other IPCA series, but series 433
+  still has no record of its own.
 - Series 433, 13522, 3698 and 189 have **no page on the portal**, so the
   licence for them was not confirmed. Their data originates from IBGE (IPCA)
   and FGV (IGP-M), according to the SGS metadata.

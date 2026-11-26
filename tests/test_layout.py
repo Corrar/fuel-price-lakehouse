@@ -37,3 +37,10 @@ def test_dataset_name_is_checked_too():
 def test_every_layer_gets_its_own_directory():
     dirs = {layer_dir(layer, Source.ANP) for layer in Layer}
     assert len(dirs) == len(Layer)
+
+
+def test_manifest_and_downloads_live_outside_the_layers(tmp_path):
+    from fuel_price_lakehouse.layout import downloads_dir, manifest_path
+
+    assert manifest_path(tmp_path) == tmp_path / "manifest" / "collection.json"
+    assert downloads_dir(tmp_path) == tmp_path / "tmp" / "downloads"
