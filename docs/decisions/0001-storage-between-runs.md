@@ -62,3 +62,9 @@ Store the state as **assets of a GitHub release in this repository**.
   without repository activity. Uploading release assets may not count as
   activity, so the weekly job needs a way to detect or avoid this (to be
   handled when the schedule is added).
+- Publishing the Parquet files means redistributing data derived from ANP. The
+  licence that applies to the ANP files is not settled (see
+  [`../sources.md`](../sources.md), section 1.6). It has to be settled before
+  the first data release is made public; if redistribution turns out not to be
+  allowed, the same mechanism still works with the manifest and the quality
+  report only.
