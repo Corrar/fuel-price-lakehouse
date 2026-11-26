@@ -81,6 +81,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="stage every file again, also the ones that did not change",
     )
     stage.set_defaults(handler=_stage)
+
+    docs = commands.add_parser("docs", help="regenerate the documents generated from the code")
+    docs.add_argument(
+        "--repository", type=Path, default=Path(), help="repository root (default: here)"
+    )
+    docs.set_defaults(handler=_docs)
     return parser
 
 
@@ -126,6 +132,14 @@ def _stage(args: argparse.Namespace) -> int:
         f"{sum(outcome.rows_quarantined for outcome in outcomes):,}",
     )
     return 1 if counts["failed"] else 0
+
+
+def _docs(args: argparse.Namespace) -> int:
+    from fuel_price_lakehouse.docgen import write_all
+
+    for path in write_all(args.repository):
+        logger.info("docs: wrote %s", path)
+    return 0
 
 
 def main(argv: Sequence[str] | None = None) -> int:

@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help install lint typecheck format test check extract clean
+.PHONY: help install lint typecheck format test check extract stage docs clean
 
 help: ## Show available targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "} {printf "  %-11s %s\n", $$1, $$2}'
@@ -25,6 +25,12 @@ check: lint typecheck test ## Everything CI runs
 
 extract: ## Collect what is new into the raw layer (SINCE=YYYY-MM sets the first month)
 	uv run fuel-lakehouse extract $(if $(SINCE),--since $(SINCE)) $(ARGS)
+
+stage: ## Validate raw files into the staged layer; rejected rows go to quarantine
+	uv run fuel-lakehouse stage $(ARGS)
+
+docs: ## Regenerate the documents generated from the code (docs/quality-rules.md)
+	uv run fuel-lakehouse docs
 
 clean: ## Remove caches and build output (never touches data/)
 	rm -rf .pytest_cache .ruff_cache dist build

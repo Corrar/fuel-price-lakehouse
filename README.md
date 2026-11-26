@@ -9,10 +9,10 @@ files) and macroeconomic series from Banco Central do Brasil (JSON API), check
 their quality, quarantine the rows that break a rule, and publish
 analysis-ready Parquet tables together with a data quality report.
 
-> **Status: stage 1 of 5 — collection.** `make extract` collects both sources
-> incrementally into a raw Parquet layer, driven by a manifest of the files
-> already ingested. Nothing is cleaned, validated or published yet, so there
-> are no results to show. This section is updated as each stage lands.
+> **Status: stage 2 of 5 — staged layer.** `make extract` collects both
+> sources incrementally and `make stage` types and validates every row: rows
+> that break a rule go to quarantine with the reason. Nothing is published
+> yet. This section is updated as each stage lands.
 
 ## Roadmap
 
@@ -20,7 +20,7 @@ analysis-ready Parquet tables together with a data quality report.
 | --- | --- | --- |
 | 0 | Sources confirmed, repository foundation, storage decision | Done |
 | 1 | Incremental collection with a file manifest; raw layer | Done |
-| 2 | Typed and normalised staged layer; validation rules; quarantine | Not started |
+| 2 | Typed and normalised staged layer; validation rules; quarantine | Done |
 | 3 | Curated tables for analysis | Not started |
 | 4 | Data quality report published on GitHub Pages | Not started |
 | 5 | Weekly scheduled run on GitHub Actions | Not started |
@@ -45,7 +45,7 @@ ruff, GitHub Actions. No paid services.
 ## Collection (stage 1)
 
 ```sh
-make extract                 # history from 2023-01 (the default)
+make extract                 # history from 2020-01 (the default)
 make extract SINCE=2026-01   # choose the first month
 make extract SINCE=2004-01 ARGS=--dry-run   # list what would be downloaded, with sizes
 ```
@@ -76,12 +76,35 @@ downloads everything again and compares hashes, for an occasional audit.
 How much history to load (measured on 2026-11-26, details in
 [`docs/sources.md`](docs/sources.md)):
 
-| `SINCE` | Download | Time at 0.75 MB/s |
+| `SINCE` | Download | Estimated time at 0.75 MB/s |
 | --- | ---: | ---: |
 | `2026-01` | 96 MB | 2 min |
-| `2023-01` (default) | 242 MB | 5 min |
-| `2020-01` | 603 MB | 13 min |
+| `2023-01` | 242 MB | 5 min |
+| `2020-01` (default) | 603 MB | 13 min |
 | `2004-01` (everything) | 4,813 MB | 107 min |
+
+## Staged layer and quarantine (stage 2)
+
+```sh
+make stage        # type and validate every raw file that changed since the last run
+```
+
+- Every raw row ends up in exactly one place: the staged layer (typed:
+  dates, prices, a 14-digit CNPJ, normalised units and whitespace) or the
+  quarantine (the original text of every field, plus the ids of the rules it
+  broke). For every file, rows read = rows staged + rows quarantined.
+- 22 rules for ANP rows and 5 for the Banco Central series, each with an id,
+  a severity and a one-sentence description in English and Portuguese.
+  Error rules send a row to quarantine; warning rules keep it and tag it.
+- A Pandera contract checks the staged table; if it fails, the code has a
+  bug and the run stops.
+- Incremental: a file is staged again only when its raw content or the
+  rules changed. A second run changes no byte.
+
+On the history since 2020: 6,965,798 rows staged and 9,130 in quarantine
+(9,114 blank rows at the end of one file and 16 exact duplicates), 55 files
+in about 50 seconds. The decisions behind this are in
+[ADR 0003](docs/decisions/0003-validation-and-quarantine.md).
 
 ## Documentation
 
@@ -90,6 +113,10 @@ How much history to load (measured on 2026-11-26, details in
   in samples.
 - [`docs/decisions/0001-storage-between-runs.md`](docs/decisions/0001-storage-between-runs.md)
   — where the data lives between runs, and why.
+- [`docs/decisions/0002-what-is-published.md`](docs/decisions/0002-what-is-published.md)
+  — what leaves the machine that runs the pipeline (aggregates only).
+- [`docs/decisions/0003-validation-and-quarantine.md`](docs/decisions/0003-validation-and-quarantine.md)
+  — validation rules, quarantine, and what is incremental.
 
 ## Development
 
@@ -125,7 +152,7 @@ e séries do Banco Central (API SGS), conferir a qualidade, separar em
 quarentena as linhas que quebram alguma regra e publicar tabelas prontas para
 análise, com um relatório de qualidade.
 
-**Situação: etapa 1 de 5 — coleta.** `make extract` baixa só o que é novo das
-duas fontes e grava uma cópia fiel em Parquet (camada bruta), guiado por um
-registro dos arquivos já coletados. Ainda não há limpeza, validação nem
-resultados publicados.
+**Situação: etapa 2 de 5 — camada tratada.** `make extract` baixa só o que é
+novo das duas fontes e `make stage` tipa e valida cada linha: o que quebra uma
+regra vai para a quarentena com o motivo, nunca é descartado em silêncio. Ainda
+não há resultados publicados.
