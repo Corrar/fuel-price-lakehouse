@@ -1,8 +1,8 @@
 .DEFAULT_GOAL := help
-.PHONY: help install lint format test check extract clean
+.PHONY: help install lint typecheck format test check extract clean
 
 help: ## Show available targets
-	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "} {printf "  %-10s %s\n", $$1, $$2}'
+	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "} {printf "  %-11s %s\n", $$1, $$2}'
 
 install: ## Create the virtualenv and install locked dependencies
 	uv sync --locked
@@ -15,10 +15,13 @@ format: ## Fix what can be fixed automatically and format the code
 	uv run ruff check --fix .
 	uv run ruff format .
 
-test: ## Run the test suite
-	uv run pytest
+typecheck: ## Static type check of the package
+	uv run mypy
 
-check: lint test ## Everything CI runs
+test: ## Run the test suite with coverage (never touches the network)
+	uv run pytest --cov --cov-report=term-missing:skip-covered
+
+check: lint typecheck test ## Everything CI runs
 
 extract: ## Collect what is new into the raw layer (SINCE=YYYY-MM sets the first month)
 	uv run fuel-lakehouse extract $(if $(SINCE),--since $(SINCE)) $(ARGS)
