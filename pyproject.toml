@@ -7,14 +7,23 @@ requires-python = ">=3.12"
 license = "MIT"
 license-files = ["LICENSE"]
 dependencies = [
+    "duckdb>=1.1",
     "httpx>=0.28",
+    "pandas>=2.2",
+    "pandera[pandas]>=0.22",
     "pyarrow>=18",
     "tenacity>=9",
 ]
 
+[project.scripts]
+fuel-lakehouse = "fuel_price_lakehouse.cli:main"
+
 [dependency-groups]
 dev = [
+    "mypy>=1.13",
+    "pandas-stubs>=3.1.0.261029",
     "pytest>=8.3",
+    "pytest-cov>=6",
     "ruff>=0.8",
 ]
 
@@ -36,3 +45,25 @@ src = ["src", "tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP", "SIM", "C4", "PTH", "RUF"]
+
+[tool.mypy]
+python_version = "3.12"
+files = ["src"]
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+no_implicit_optional = true
+
+[[tool.mypy.overrides]]
+module = ["pyarrow.*", "duckdb.*", "pandera.*"]
+ignore_missing_imports = true
+
+[tool.coverage.run]
+source = ["fuel_price_lakehouse"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true

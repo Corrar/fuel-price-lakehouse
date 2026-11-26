@@ -19,6 +19,9 @@ _SAFE_VALUE = re.compile(r"[A-Za-z0-9._-]+")
 class Layer(StrEnum):
     """Pipeline layers, in the order data flows through them."""
 
+    LANDING = "landing"
+    """Downloaded files, byte for byte, addressed by the hash of their content."""
+
     RAW = "raw"
     """A faithful copy of each downloaded file: every value as text, never modified."""
 
@@ -39,9 +42,9 @@ class Source(StrEnum):
     BCB_SGS = "bcb_sgs"
 
 
-def layer_dir(layer: Layer, source: Source, root: Path = DEFAULT_DATA_ROOT) -> Path:
+def layer_dir(layer: Layer, source: str, root: Path = DEFAULT_DATA_ROOT) -> Path:
     """Directory holding everything from ``source`` at ``layer``."""
-    return root / layer.value / source.value
+    return root / layer.value / Source(source).value
 
 
 def manifest_path(root: Path = DEFAULT_DATA_ROOT) -> Path:
@@ -52,6 +55,36 @@ def manifest_path(root: Path = DEFAULT_DATA_ROOT) -> Path:
 def downloads_dir(root: Path = DEFAULT_DATA_ROOT) -> Path:
     """Scratch space for files being downloaded. Safe to delete at any time."""
     return root / "tmp" / "downloads"
+
+
+def staging_state_path(root: Path = DEFAULT_DATA_ROOT) -> Path:
+    """What the staging step already processed, and how each file fared."""
+    return root / "manifest" / "staging.json"
+
+
+def sibling_in_layer(raw_relative: str, layer: Layer) -> str:
+    """Path of the file derived from a raw file, in another layer.
+
+    Staged and quarantine files mirror the raw layout one to one, so a file can
+    be followed across layers by its path alone.
+
+    >>> sibling_in_layer("raw/anp/fuel_prices/kind=monthly/abc.parquet", Layer.QUARANTINE)
+    'quarantine/anp/fuel_prices/kind=monthly/abc.parquet'
+    """
+    first, _, rest = raw_relative.partition("/")
+    if first != Layer.RAW or not rest:
+        raise ValueError(f"not a raw layer path: {raw_relative!r}")
+    return f"{layer.value}/{rest}"
+
+
+def curated_dir(root: Path = DEFAULT_DATA_ROOT) -> Path:
+    """Tables built from the staged layer, one sub-path per table."""
+    return root / Layer.CURATED.value
+
+
+def quality_dir(root: Path = DEFAULT_DATA_ROOT) -> Path:
+    """The latest quality report and the history of past runs."""
+    return root / "quality"
 
 
 def partition_dir(

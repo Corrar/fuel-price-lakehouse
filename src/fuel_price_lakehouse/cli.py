@@ -1,0 +1,154 @@
+"""Command line entry point: one subcommand per pipeline stage.
+
+fuel-lakehouse extract --since 2023-01
+"""
+
+from __future__ import annotations
+
+import argparse
+import logging
+import sys
+from collections import Counter
+from collections.abc import Sequence
+from datetime import date
+from pathlib import Path
+
+from fuel_price_lakehouse.config import DEFAULT_SINCE, parse_month
+from fuel_price_lakehouse.layout import DEFAULT_DATA_ROOT
+
+logger = logging.getLogger("fuel_price_lakehouse")
+
+
+def _month(text: str) -> date:
+    try:
+        return parse_month(text)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(str(error)) from None
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="fuel-lakehouse", description=__doc__.split("\n")[0])
+    parser.add_argument("--root", type=Path, default=DEFAULT_DATA_ROOT, help="data directory")
+    parser.add_argument("-v", "--verbose", action="store_true", help="debug logging")
+    commands = parser.add_subparsers(dest="command", required=True)
+
+    extract = commands.add_parser(
+        "extract", help="collect what is new from the sources into the raw layer"
+    )
+    extract.add_argument(
+        "--since",
+        type=_month,
+        default=DEFAULT_SINCE,
+        metavar="YYYY-MM",
+        help=f"first month of history to collect (default {DEFAULT_SINCE:%Y-%m})",
+    )
+    extract.add_argument(
+        "--source",
+        choices=("anp", "bcb_sgs"),
+        action="append",
+        help="collect only this source (repeatable; default: all)",
+    )
+    extract.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="show what would be downloaded, with sizes; write nothing",
+    )
+    extract.add_argument(
+        "--full-check",
+        action="store_true",
+        help="download everything again and compare hashes",
+    )
+    extract.add_argument(
+        "--rebuild-raw",
+        action="store_true",
+        help="recreate the raw layer from the landed files, without the network",
+    )
+    extract.add_argument(
+        "--pause",
+        type=float,
+        default=1.0,
+        metavar="SECONDS",
+        help="wait between requests to the same source (default 1)",
+    )
+    extract.set_defaults(handler=_extract)
+
+    stage = commands.add_parser(
+        "stage", help="validate raw files into the staged layer; rejected rows go to quarantine"
+    )
+    stage.add_argument(
+        "--full-refresh",
+        action="store_true",
+        help="stage every file again, also the ones that did not change",
+    )
+    stage.set_defaults(handler=_stage)
+
+    docs = commands.add_parser("docs", help="regenerate the documents generated from the code")
+    docs.add_argument(
+        "--repository", type=Path, default=Path(), help="repository root (default: here)"
+    )
+    docs.set_defaults(handler=_docs)
+    return parser
+
+
+def _extract(args: argparse.Namespace) -> int:
+    from fuel_price_lakehouse.collect.http import default_client
+    from fuel_price_lakehouse.collect.run import SOURCES, rebuild_raw, run
+
+    if args.rebuild_raw:
+        rebuilt = Counter(outcome.action for outcome in rebuild_raw(args.root))
+        logger.info(
+            "extract: %s", ", ".join(f"{n} {action}" for action, n in sorted(rebuilt.items()))
+        )
+        return 1 if rebuilt["failed"] else 0
+
+    with default_client() as client:
+        outcomes = run(
+            args.root,
+            args.since,
+            client=client,
+            sources=args.source or SOURCES,
+            dry_run=args.dry_run,
+            full_check=args.full_check,
+            pause=args.pause,
+        )
+    counts = Counter(outcome.action for outcome in outcomes)
+    megabytes = sum(outcome.size_bytes for outcome in outcomes) / 1_000_000
+    summary = ", ".join(f"{count} {action}" for action, count in sorted(counts.items()))
+    verb = "to download" if args.dry_run else "downloaded"
+    logger.info("extract: %s; %.1f MB %s", summary or "nothing to do", megabytes, verb)
+    return 1 if counts["failed"] else 0
+
+
+def _stage(args: argparse.Namespace) -> int:
+    from fuel_price_lakehouse.stage.run import run
+
+    outcomes = run(args.root, full_refresh=args.full_refresh)
+    counts = Counter(outcome.action for outcome in outcomes)
+    summary = ", ".join(f"{count} {action}" for action, count in sorted(counts.items()))
+    logger.info(
+        "stage: %s; %s rows in the staged layer, %s in quarantine",
+        summary or "nothing to do",
+        f"{sum(outcome.rows_staged for outcome in outcomes):,}",
+        f"{sum(outcome.rows_quarantined for outcome in outcomes):,}",
+    )
+    return 1 if counts["failed"] else 0
+
+
+def _docs(args: argparse.Namespace) -> int:
+    from fuel_price_lakehouse.docgen import write_all
+
+    for path in write_all(args.repository):
+        logger.info("docs: wrote %s", path)
+    return 0
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    logging.basicConfig(
+        level=logging.DEBUG if args.verbose else logging.INFO,
+        format="%(asctime)s %(levelname)-7s %(message)s",
+        datefmt="%H:%M:%S",
+        stream=sys.stderr,
+    )
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    return int(args.handler(args))

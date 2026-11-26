@@ -11,8 +11,8 @@ from datetime import UTC, datetime
 import httpx
 import pytest
 
-from fuel_price_lakehouse import anp
-from fuel_price_lakehouse.http import RetryPolicy
+from fuel_price_lakehouse.collect import anp
+from fuel_price_lakehouse.collect.http import RetryPolicy
 
 FILES = "https://www.gov.br/anp/pt-br/centrais-de-conteudo/dados-abertos/arquivos/shpc"
 SGS = "https://api.bcb.gov.br/dados/serie/bcdata.sgs"
@@ -27,7 +27,7 @@ HEADER = (
 def anp_csv(*prices: str) -> bytes:
     """An ANP-shaped CSV: BOM, ``;``, CRLF, padded CNPJ, a quoted ``;``, empty fields."""
     rows = [
-        f'SE;SP;SAO PAULO;POSTO {n} LTDA; 01.492.748/0003-83;RUA A;S/N;"LOTE: 04;";'
+        f'SE;SP;SAO PAULO;POSTO {n} LTDA; 11.222.333/0001-81;RUA A;S/N;"LOTE: 04;";'
         f"CENTRO;01000-000;GASOLINA;05/10/2026;{price};;R$ / litro;BRANCA"
         for n, price in enumerate(prices, start=1)
     ]
@@ -115,6 +115,7 @@ class FakeWeb:
         self.failures: dict[str, list[BaseException | int]] = {}
         """Queued per URL: an exception to raise or a status to answer, once each."""
         self.truncate: set[str] = set()
+        self.unknown_series: set[int] = set()
         self.requests: list[tuple[str, str]] = []
         """(kind, url) with kind in ``page``, ``probe``, ``download``, ``sgs``."""
 
@@ -159,6 +160,8 @@ class FakeWeb:
     def _sgs(self, request: httpx.Request, url: str) -> httpx.Response:
         self.requests.append(("sgs", url))
         match = re.search(r"sgs\.(\d+)/dados\?formato=json&dataInicial=01/01/(\d{4})", url)
+        if int(match.group(1)) in self.unknown_series:
+            return httpx.Response(404, text="A serie nao existe!")
         body = self.sgs.get((int(match.group(1)), int(match.group(2))))
         if body is None:
             return httpx.Response(404, json={"erro": {"detail": "Value(s) not found"}})
@@ -181,6 +184,5 @@ def fast() -> dict:
         "sleep": waits.append,
         "retry": RetryPolicy(attempts=3, initial_wait=2.0, max_wait=60.0),
         "now": lambda: datetime(2026, 11, 26, 12, 0, tzinfo=UTC),
-        "log": lambda _line: None,
         "waits": waits,
     }

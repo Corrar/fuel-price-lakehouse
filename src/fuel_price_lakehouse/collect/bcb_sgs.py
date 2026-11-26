@@ -15,18 +15,24 @@ with its ETag, which costs a 304 when nothing was published.
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Callable
+import logging
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from pathlib import Path
 
-from fuel_price_lakehouse.http import Fetcher, SourceError, TransientError
+import httpx
+
+from fuel_price_lakehouse.collect import landing
+from fuel_price_lakehouse.collect.http import Fetcher, SourceError, TransientError
+from fuel_price_lakehouse.collect.manifest import FileRecord, Manifest, Outcome
+from fuel_price_lakehouse.collect.raw import CorruptFileError, Provenance, write_json_records
+from fuel_price_lakehouse.config import Clock
 from fuel_price_lakehouse.layout import Layer, Source, partition_dir
-from fuel_price_lakehouse.manifest import FileRecord, Manifest, Outcome
-from fuel_price_lakehouse.raw import CorruptFileError, Provenance, write_json_records
 
 API = "https://api.bcb.gov.br/dados/serie/bcdata.sgs.{code}/dados"
 DATASET = "series"
+
+logger = logging.getLogger(__name__)
 
 MAX_WINDOW_YEARS = 10
 """Longest window the API accepts for a daily series (406 beyond it)."""
@@ -93,11 +99,10 @@ def collect(
     root: Path,
     since: date,
     *,
-    now: Callable[[], datetime],
+    now: Clock,
     series: tuple[Series, ...] = SERIES,
     dry_run: bool = False,
     full_check: bool = False,
-    log: Callable[[str], None] = print,
 ) -> list[Outcome]:
     """Bring the raw layer up to date with the SGS API."""
     outcomes = []
@@ -105,7 +110,7 @@ def collect(
         results = []
         for window in windows(one.code, since, now().date()):
             record = manifest.get(window.key)
-            if not full_check and _settled(record, window):
+            if not full_check and _settled(record, window, root):
                 outcome = Outcome(window.key, "unchanged")
             elif dry_run:
                 outcome = Outcome(window.key, "planned")
@@ -121,18 +126,18 @@ def collect(
                     outcome = Outcome(window.key, "failed", detail=str(error))
                 manifest.save()
             results.append(outcome)
-            log(f"bcb_sgs: {outcome.action:9} {window.key} {outcome.detail}")
+            logger.info("bcb_sgs: %-9s %s %s", outcome.action, window.key, outcome.detail)
         if not dry_run and not _has_rows(manifest, one.code):
             # An unknown series code answers 404 exactly like an empty window does.
             detail = "no data in any window: check the series code"
             results.append(Outcome(f"{Source.BCB_SGS}/{one.code}", "failed", detail=detail))
-            log(f"bcb_sgs: failed    series {one.code} {detail}")
+            logger.error("bcb_sgs: failed    series %s %s", one.code, detail)
         outcomes.extend(results)
     return outcomes
 
 
-def _settled(record: FileRecord | None, window: Window) -> bool:
-    return record is not None and record.ingested and record.details.get("settled") == "yes"
+def _settled(record: FileRecord | None, window: Window, root: Path) -> bool:
+    return record is not None and record.usable_in(root) and record.details.get("settled") == "yes"
 
 
 def _mark_if_settled(record: FileRecord | None, window: Window, today: date) -> None:
@@ -146,33 +151,51 @@ def _has_rows(manifest: Manifest, code: int) -> bool:
     return any(key.startswith(prefix) and (r.rows or 0) > 0 for key, r in manifest.files.items())
 
 
+def _is_empty_window(response: httpx.Response) -> bool:
+    """Tell "no observations in this window" apart from "no such series".
+
+    Both are a 404. The first comes as JSON; the second as plain text ("A serie
+    nao existe!"), which must fail loudly instead of being stored as an empty year.
+    """
+    if response.status_code != 404:
+        return False
+    if "json" not in response.headers.get("Content-Type", ""):
+        raise SourceError(f"{response.request.url}: HTTP 404 and not JSON: unknown series?")
+    return True
+
+
 def _collect_window(
     fetcher: Fetcher,
     manifest: Manifest,
     root: Path,
     window: Window,
-    now: Callable[[], datetime],
+    now: Clock,
     full_check: bool,
 ) -> Outcome:
     record = manifest.get(window.key)
-    known = record is not None and record.ingested
-    etag = record.details.get("etag", "") if known else ""
+    previous = record if record is not None and record.usable_in(root) else None
+    etag = previous.details.get("etag", "") if previous is not None else ""
     headers = {"If-None-Match": etag} if etag and not full_check else None
     response = fetcher.get(window.url, headers=headers, allowed=(200, 304, 404))
     if response.status_code == 304:
         return Outcome(window.key, "unchanged", detail="not modified")
 
-    # 404 is how the API says "no observations in this window".
-    body = b"[]" if response.status_code == 404 else response.content
+    body = b"[]" if _is_empty_window(response) else response.content
     sha256 = hashlib.sha256(body).hexdigest()
     new_etag = response.headers.get("ETag", "")
-    if known and record.sha256 == sha256:
-        record.details["etag"] = new_etag
+    if previous is not None and previous.sha256 == sha256:
+        previous.details["etag"] = new_etag
         return Outcome(window.key, "unchanged", len(body), detail="same hash")
-    if response.status_code == 404 and known and record.rows:
-        raise SourceError(f"{window.url}: had {record.rows} rows, now reports no data")
+    if response.status_code == 404 and previous is not None and previous.rows:
+        raise SourceError(f"{window.url}: had {previous.rows} rows, now reports no data")
 
     collected_at = now()
+    # Only what the API really sent is landed: the "[]" of an empty window is ours.
+    landed = (
+        landing.store_bytes(body, sha256, Source.BCB_SGS, root)
+        if response.status_code == 200
+        else None
+    )
     destination = raw_path(window, root)
     rows = write_json_records(body, destination, Provenance(window.url, sha256, collected_at))
     if rows == 0:
@@ -188,8 +211,11 @@ def _collect_window(
             sha256=sha256,
             rows=rows,
             raw_path=destination.relative_to(root).as_posix() if rows else None,
+            landing_path=landed.relative_to(root).as_posix() if landed else None,
             revision=(record.revision if record else 0) + 1,
             details={"series": str(window.code), "year": str(window.start.year), "etag": new_etag},
+            superseded=previous.history_with_current() if previous is not None else [],
         )
     )
-    return Outcome(window.key, "updated" if known else "new", len(body), rows, f"{rows:,} rows")
+    action = "updated" if previous is not None else "new"
+    return Outcome(window.key, action, len(body), rows, f"{rows:,} rows")

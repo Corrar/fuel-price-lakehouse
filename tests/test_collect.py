@@ -10,7 +10,10 @@ import httpx
 import pyarrow.parquet as pq
 import pytest
 
-from fuel_price_lakehouse import extract
+from fuel_price_lakehouse import cli
+from fuel_price_lakehouse.collect import landing
+from fuel_price_lakehouse.collect.run import rebuild_raw
+from fuel_price_lakehouse.collect.run import run as collect
 from fuel_price_lakehouse.layout import manifest_path
 
 from .conftest import (
@@ -29,9 +32,9 @@ SINCE = date(2026, 7, 1)
 
 
 def run(web: FakeWeb, root: Path, fast: dict, since: date = SINCE, **options):
-    settings = {key: fast[key] for key in ("sleep", "retry", "now", "log")}
+    settings = {key: fast[key] for key in ("sleep", "retry", "now")}
     with web.client() as client:
-        return extract.run(root, since, client=client, **settings, **options)
+        return collect(root, since, client=client, **settings, **options)
 
 
 def actions(outcomes) -> dict[str, str]:
@@ -83,7 +86,7 @@ def test_raw_layer_is_a_faithful_text_copy(web, tmp_path, fast):
     assert table.column_names[:16] == source_columns  # BOM gone, names untouched
     assert all(str(table.schema.field(name).type) == "string" for name in source_columns)
     row = table.to_pylist()[0]
-    assert row["CNPJ da Revenda"] == " 01.492.748/0003-83"  # leading space kept
+    assert row["CNPJ da Revenda"] == " 11.222.333/0001-81"  # leading space kept
     assert row["Complemento"] == "LOTE: 04;"  # quoted separator is data, not a new field
     assert row["Valor de Venda"] == "6,01"  # decimal comma kept, still text
     assert row["Valor de Compra"] == ""  # empty stays empty, not null
@@ -249,6 +252,71 @@ def test_corrupt_republication_keeps_the_previous_good_version(web, tmp_path, fa
     assert pq.read_table(tmp_path / record["raw_path"]).num_rows == 2
 
 
+def test_file_in_windows_1252_is_read_and_the_encoding_recorded(web, tmp_path, fast):
+    # ANP published at least one file (2021-S2) in Windows-1252 instead of UTF-8.
+    text = (
+        HEADER + "\r\nSE;SP;SAO PAULO;POSTO SÃO JOÃO;x;RUA;1;;;;GLP;05/10/2026;110,00;;u;BRANCA\r\n"
+    )
+    web.files[OCTOBER_LPG] = text.encode("cp1252")
+    run(web, tmp_path, fast)
+
+    record = manifest(tmp_path)[OCTOBER_LPG]
+    assert record["details"]["encoding"] == "cp1252"
+    row = pq.read_table(tmp_path / record["raw_path"]).to_pylist()[0]
+    assert row["Revenda"] == "POSTO SÃO JOÃO"
+    assert manifest(tmp_path)[OCTOBER_DIESEL]["details"]["encoding"] == "utf-8"
+
+
+def test_bom_file_with_invalid_utf8_is_corrupt_not_read_as_another_encoding(web, tmp_path, fast):
+    web.files[OCTOBER_LPG] = anp_csv("110,00").replace(b"SAO PAULO", b"S\xc3O PAULO")
+    outcomes = run(web, tmp_path, fast)
+
+    assert actions(outcomes)[OCTOBER_LPG] == "failed"
+    assert "not a readable CSV" in manifest(tmp_path)[OCTOBER_LPG]["last_error"]
+
+
+def test_unclosed_quote_fails_the_file_instead_of_merging_rows(web, tmp_path, fast):
+    good = anp_csv("110,00", "111,00", "112,00").decode("utf-8")
+    web.files[OCTOBER_LPG] = good.replace("POSTO 1 LTDA", 'POSTO "1 LTDA', 1).encode("utf-8")
+    web.files[OCTOBER_LPG] = web.files[OCTOBER_LPG].replace(b';POSTO "1', b';"POSTO 1', 1)
+    outcomes = run(web, tmp_path, fast)
+
+    assert actions(outcomes)[OCTOBER_LPG] == "failed"
+    assert "unbalanced quote" in manifest(tmp_path)[OCTOBER_LPG]["last_error"]
+    assert not list(tmp_path.rglob("fuel_group=lpg/**/*.parquet"))
+
+
+def test_malformed_quoting_falls_back_to_the_lenient_reader(web, tmp_path, fast):
+    # A quote closed in the middle of a field is an error for the strict reader.
+    bad = '"AV "BRASIL" 100"'
+    body = (
+        "\ufeff" + HEADER + f"\r\nSE;SP;SAO PAULO;POSTO;x;{bad};1;;;;GLP;05/10/2026;110,00;;u;B\r\n"
+    )
+    web.files[OCTOBER_LPG] = body.encode()
+    run(web, tmp_path, fast)
+
+    record = manifest(tmp_path)[OCTOBER_LPG]
+    assert record["status"] == "ok"
+    assert record["details"]["csv_parsing"] == "lenient"
+    assert record["rows"] == 1
+    assert manifest(tmp_path)[OCTOBER_DIESEL]["details"]["csv_parsing"] == "strict"
+
+
+def test_republication_keeps_an_audit_trail_of_earlier_versions(web, tmp_path, fast):
+    run(web, tmp_path, fast)
+    first = manifest(tmp_path)[OCTOBER_DIESEL]
+    web.files[OCTOBER_DIESEL] = anp_csv("6,01", "6,02", "6,03")
+    run(web, tmp_path, fast)
+    web.files[OCTOBER_DIESEL] = anp_csv("6,01", "6,02", "6,03", "6,04")
+    run(web, tmp_path, fast)
+
+    record = manifest(tmp_path)[OCTOBER_DIESEL]
+    assert record["revision"] == 3
+    assert [version["rows"] for version in record["superseded"]] == [2, 3]
+    assert record["superseded"][0]["sha256"] == first["sha256"]
+    assert record["superseded"][0]["collected_at"] == first["collected_at"]
+
+
 def test_zip_member_is_read_by_position_whatever_its_name(web, tmp_path, fast):
     web.files[SEMESTER_ZIP] = zipped(anp_csv("5,99"), name="qualquer coisa.dat")
     run(web, tmp_path, fast, since=date(2026, 1, 1))
@@ -286,6 +354,74 @@ def test_full_check_downloads_again_but_rewrites_nothing(web, tmp_path, fast):
     assert set(actions(outcomes).values()) == {"unchanged"}
     assert len(web.downloads()) == 4
     assert snapshot(tmp_path) == before
+
+
+def test_record_whose_raw_file_is_gone_is_collected_again(web, tmp_path, fast):
+    run(web, tmp_path, fast)
+    records = manifest(tmp_path)
+    (tmp_path / records[OCTOBER_DIESEL]["raw_path"]).unlink()
+    (tmp_path / records["bcb_sgs/1/2026"]["raw_path"]).unlink()
+    web.requests.clear()
+
+    outcomes = run(web, tmp_path, fast)
+
+    assert web.downloads() == [OCTOBER_DIESEL]
+    assert (tmp_path / records[OCTOBER_DIESEL]["raw_path"]).is_file()
+    assert (tmp_path / records["bcb_sgs/1/2026"]["raw_path"]).is_file()
+    assert actions(outcomes)[OCTOBER_LPG] == "unchanged"
+
+
+# --- landing zone --------------------------------------------------------------------------------
+
+
+def test_downloaded_bytes_are_kept_and_match_the_recorded_hash(web, tmp_path, fast):
+    run(web, tmp_path, fast, since=date(2026, 1, 1))
+
+    for url in (OCTOBER_DIESEL, SEMESTER_ZIP):  # a CSV (compressed) and a ZIP (kept as is)
+        record = manifest(tmp_path)[url]
+        landed = tmp_path / record["landing_path"]
+        assert landed.name.startswith(record["sha256"])
+        assert landing.sha256_of(landed) == record["sha256"]
+    assert (tmp_path / manifest(tmp_path)[SEMESTER_ZIP]["landing_path"]).read_bytes() == (
+        web.files[SEMESTER_ZIP]
+    )
+    sgs = manifest(tmp_path)["bcb_sgs/1/2026"]
+    assert landing.sha256_of(tmp_path / sgs["landing_path"]) == sgs["sha256"]
+
+
+def test_republication_lands_next_to_the_version_it_replaces(web, tmp_path, fast):
+    run(web, tmp_path, fast)
+    first = manifest(tmp_path)[OCTOBER_DIESEL]
+    web.files[OCTOBER_DIESEL] = anp_csv("6,01", "6,02", "6,03")
+    run(web, tmp_path, fast)
+
+    second = manifest(tmp_path)[OCTOBER_DIESEL]
+    assert second["landing_path"] != first["landing_path"]
+    assert second["superseded"][0]["landing_path"] == first["landing_path"]
+    assert landing.sha256_of(tmp_path / first["landing_path"]) == first["sha256"]  # still there
+
+
+def test_raw_layer_can_be_rebuilt_from_landing_without_the_network(web, tmp_path, fast):
+    run(web, tmp_path, fast)
+    records = manifest(tmp_path)
+    raw = tmp_path / records[OCTOBER_DIESEL]["raw_path"]
+    before = pq.read_table(raw)
+    for record in records.values():
+        if record["raw_path"]:
+            (tmp_path / record["raw_path"]).unlink()
+    web.requests.clear()
+
+    outcomes = rebuild_raw(tmp_path)
+
+    assert {outcome.action for outcome in outcomes} == {"rebuilt"}
+    assert web.requests == []
+    assert pq.read_table(raw).equals(before)  # same rows, same provenance columns
+    assert manifest(tmp_path) == records
+
+
+def test_empty_sgs_window_lands_nothing(web, tmp_path, fast):
+    run(web, tmp_path, fast, since=date(2025, 1, 1), sources=["bcb_sgs"])
+    assert manifest(tmp_path)["bcb_sgs/433/2025"]["landing_path"] is None
 
 
 # --- Banco Central SGS -------------------------------------------------------------------------
@@ -326,6 +462,15 @@ def test_sgs_unknown_series_is_not_mistaken_for_empty_windows(web, tmp_path, fas
 
     assert actions(outcomes)["bcb_sgs/433"] == "failed"
     assert actions(outcomes)["bcb_sgs/1/2026"] == "new"
+
+
+def test_sgs_404_that_is_not_json_means_the_series_does_not_exist(web, tmp_path, fast):
+    web.unknown_series.add(433)
+    outcomes = run(web, tmp_path, fast, sources=["bcb_sgs"])
+
+    assert actions(outcomes)["bcb_sgs/433/2026"] == "failed"
+    assert "unknown series" in manifest(tmp_path)["bcb_sgs/433/2026"]["last_error"]
+    assert manifest(tmp_path)["bcb_sgs/433/2026"]["status"] == "failed"
 
 
 def test_sgs_second_run_revalidates_with_etag_and_writes_nothing(web, tmp_path, fast):
@@ -378,6 +523,7 @@ def test_sgs_malformed_body_is_a_failure_not_a_raw_file(web, tmp_path, fast):
 
 
 def test_since_must_be_year_month():
-    assert extract.parse_since("2026-07") == date(2026, 7, 1)
-    with pytest.raises(Exception, match="expected YYYY-MM"):
-        extract.parse_since("07/2026")
+    args = cli.build_parser().parse_args(["extract", "--since", "2026-07"])
+    assert args.since == date(2026, 7, 1)
+    with pytest.raises(SystemExit):
+        cli.build_parser().parse_args(["extract", "--since", "07/2026"])

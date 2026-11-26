@@ -102,10 +102,11 @@ Sizes of every file the collector would download for the full history, read
 on 2026-11-26 with `make extract SINCE=2004-01 ARGS=--dry-run` (one-byte range
 requests, nothing downloaded): 105 files, **4,813 MB**. That is 90 semester
 files, the 12 monthly files not yet covered by a semester file (July to October
-2026) and the 3 four-week files. Cumulative size by first year collected, with
-the time it takes at the 0.75 MB/s measured above:
+2026) and the 3 four-week files. Cumulative size by first year collected. The
+time column is arithmetic (size divided by the 0.75 MB/s measured above), not a
+timed download:
 
-| History starting in | Download | Time at 0.75 MB/s |
+| History starting in | Download | Estimated time at 0.75 MB/s |
 | --- | ---: | ---: |
 | 2026 | 96 MB | 2 min |
 | 2025 | 142 MB | 3 min |
@@ -116,21 +117,27 @@ the time it takes at the 0.75 MB/s measured above:
 | 2004 (everything) | 4,813 MB | 107 min |
 
 The years up to 2021 weigh much more because the automotive semester files were
-published as plain CSV (150 to 350 MB per year); from 2022 on they are zipped
-(about 45 to 56 MB per year, all groups).
+published as plain CSV: automotive and LPG together are 150 to 350 MB per year.
+From 2022 on the automotive files are zipped (about 45 to 56 MB per year, all
+groups).
+
+The history since 2020 was then downloaded in full on the same day: 41 ANP
+files and 14 yearly request windows of the two Banco Central series, 603.5 MB
+as served, 6,974,928 ANP rows, stored as 127 MB of raw Parquet.
 
 ### 1.4 File format
 
-Identical in every sample, from 2004 to November 2026, across semester,
+Identical in every sample but one (the encoding of one file, below), from 2004
+to November 2026, across semester,
 monthly and four-week files.
 
 | Property | Value |
 | --- | --- |
 | Container | Plain CSV, or a ZIP holding one CSV |
-| Encoding | UTF-8 **with BOM** |
+| Encoding | UTF-8 **with BOM**. One exception found so far: `dsas/ca/ca-2021-02.csv` is Windows-1252 without BOM (found when the history since 2020 was collected; the 15 files sampled before it were all UTF-8). |
 | Separator | `;` |
 | Line ending | CRLF |
-| Quoting | Only when a field contains `;` or `"`; inner quotes are doubled |
+| Quoting | Only when a field contains `;`, `"` or a tab; inner quotes are doubled |
 | Dates | `dd/mm/yyyy` |
 | Decimal separator | Comma |
 | Missing value | Empty string |
@@ -172,10 +179,10 @@ Counts refer to the file named. Three files were read in full: `ca-2026-01`
 | Problem | Evidence |
 | --- | --- |
 | **Naive `;` splitting breaks rows** | 5,645 rows in `ca-2026-01` and 609 in the four-week file contain a quoted `;`, for example an address complement written as `"LOTE: 04;"`. With a quote-aware parser every row has 16 fields. |
-| **Leading space in every CNPJ** | Every row in every sample (`; 01.492.748/0003-83;`). After trimming, all masks and check digits are valid. |
+| **CNPJ written two ways** | The samples all have a leading space and the mask (in the shape `; 11.222.333/0001-81;`; the example is not a real station). The two 2025-S2 semester files, read later, have 14 bare digits. After reducing to digits, all masks and check digits are valid. |
 | **Decimal comma, and integers without separator** | Every price uses a comma. In `glp-2004-01`, 39,955 rows hold a bare integer price such as `30`. |
 | **Purchase price empty** | 422,418 of 422,418 rows in `ca-2026-01`; 31,089 of 45,925 in `glp-2004-01`. |
-| **Exact duplicate rows** | 6 in `ca-2026-01`, none in the other samples. No duplicated (CNPJ, product, date) key had conflicting prices. |
+| **Exact duplicate rows** | 6 in `ca-2026-01`, none in the other samples. No duplicated (CNPJ, product, date) key had conflicting prices in the samples; the full history since 2020 has 4 such keys, all in `ca-2024-01` (section 1.8). |
 | **Republished rows** | The four-week file overlaps the monthly file: all 6,099 rows sampled from the end of the October 2026 monthly file (27–30/10/2026) also exist in the four-week file. 6,097 are byte-identical; 2 differ only in the station's name. |
 | **Station name drift** | The same CNPJ on the same date appears as `… LTDA` in one file and `… LTDA - EPP` in the other. Names are not a stable key; the CNPJ is. |
 | **Stray whitespace** | Leading or trailing spaces in non-CNPJ fields in 2,162 rows of `ca-2026-01` and 28,674 of `glp-2004-01`. Runs of repeated spaces inside a field in 40,020 rows of `ca-2026-01`. One 2004 row has a tab inside a field. |
@@ -227,15 +234,48 @@ Concorrência)", `sdc@anp.gov.br`.
   2006–2020, and the CSVs inside the 2022–2025 ZIPs).
 - Full-file statistics for old automotive files, for the four-week diesel-CNG
   and LPG files, and for the monthly files.
-- Whether monthly files overlap semester files (no pair covering the same
-  period was sampled).
 - Whether already published semester files are corrected or re-issued later.
   There are no validators, and this was a single observation.
-- The actual weekday of the weekly update. Only one "atualizado em" stamp was
-  seen (23/11/2026, a Monday).
+- The actual weekday of the weekly update. ANP says results are published "como
+  regra geral, às sextas-feiras", but the one "atualizado em" stamp seen on the
+  files page was a Monday (23/11/2026).
 - The licence field of the dataset record on dados.gov.br (needs a browser or
   an API key), or a written answer from ANP (`sdc@anp.gov.br`).
 - Behaviour under parallel or high-volume requests.
+
+### 1.8 Survey conventions
+
+Researched on 2026-11-26 from ANP's own pages and files, and checked against
+the collected data. These are the facts the staged and curated layers rely on.
+
+| Topic | What was established | Source |
+| --- | --- | --- |
+| **Survey week** | Sunday to Saturday. All 1,163 weeks from 2004 to 2026 in ANP's weekly spreadsheets (`DATA INICIAL` / `DATA FINAL`) start on a Sunday and end on a Saturday. Bucketing `Data da Coleta` that way reproduces ANP's station counts for the week of 15–21/11/2026 for all seven products. ANP never states the convention in words, and two week labels on its pages are off by a day, so the week is always computed from the collection date. | [weekly series since 2013](https://www.gov.br/anp/pt-br/assuntos/precos-e-defesa-da-concorrencia/precos/precos-revenda-e-de-distribuicao-combustiveis/shlp/semanal/semanal-brasil-desde-2013.xlsx) |
+| **Who is surveyed** | Not a fixed panel: stations are drawn at random every week from ANP's registry, with a quota per locality. The full design is 459 localities and 10,920 visits a week; budget cuts reduced it between July 2024 and November 2025. | [survey information page](https://www.gov.br/anp/pt-br/assuntos/precos-e-defesa-da-concorrencia/precos/precos-revenda-e-de-distribuicao-combustiveis/informacoes-levantamento-de-precos-de-combustiveis), [2025 impact report](https://www.gov.br/anp/pt-br/assuntos/consultas-e-audiencias-publicas/consulta-previa/2025/cp-03-2025/rpair.pdf) |
+| **Gaps** | "Não houve pesquisa de preços entre 23/8/2020 e 17/10/2020." The week of 18–24/09/2022 has no station-level rows (change of contractor). The weeks right after each gap have far fewer stations than usual. | [survey information page](https://www.gov.br/anp/pt-br/assuntos/precos-e-defesa-da-concorrencia/precos/precos-revenda-e-de-distribuicao-combustiveis/informacoes-levantamento-de-precos-de-combustiveis); the collected data |
+| **Averages** | A municipality's average is a simple mean of its stations (reproduced for 2,493 of 2,494 municipality-products of one week). ANP's state and national averages are weighted by sales volume, which is not in the open data. **This project publishes simple means over surveyed stations, so its state and national figures differ slightly from ANP's bulletins.** | the collected data, compared with ANP's weekly summary |
+| **`Valor de Compra`** | The distribution price paid by the station. "Série disponível até agosto de 2020"; the last value in the data is dated 17/08/2020. | [metadata PDF](https://www.gov.br/anp/pt-br/centrais-de-conteudo/dados-abertos/arquivos/shpc/metadados-serie-historica-precos-combustiveis-1.pdf) |
+| **`Bandeira` = `BRANCA`** | A station that "opta por não exibir marca comercial de nenhuma distribuidora" (white-flag, unbranded). | metadata PDF |
+| **Products** | `GASOLINA ADITIVADA` appears from 19/10/2020. Prices are cash prices; three decimal places were legitimate until May 2022. | survey information page; the collected data |
+| **Ethanol rule of thumb** | Ethanol "só é economicamente vantajoso […] quando o preço deste representar 70% ou menos do valor da gasolina comum". No more recent ANP statement was found, and gasoline now carries more ethanol than in 2016, so the dashboard presents it as a rule of thumb. | [ANP, Boletim Anual de Preços 2016, p. 66](https://www.gov.br/anp/pt-br/assuntos/precos-e-defesa-da-concorrencia/precos/arquivos-boletim-anual-de-precos/boletim-2016.pdf) |
+
+Found while profiling the history since 2020 (6,974,928 rows in 41 files):
+
+- The 2025-S1 automotive file ends with 9,114 rows in which all 16 fields are
+  empty.
+- The two 2025-S2 semester files write the CNPJ as 14 bare digits (every other
+  file uses the mask with a leading space) and the GNV unit as `R$ / m3`
+  instead of `R$ / m³`.
+- The same station, product and date never has two different prices across
+  files. Inside one file it happens for 4 keys (one station, June 2024), and
+  16 rows are exact duplicates of another row.
+- The month of June 2026 is identical, row for row, in the monthly file and in
+  the semester file (53,454 rows). The last-four-weeks file and the monthly
+  file agree on every price; 22 of 20,773 shared rows differ in the station's
+  name or address only, the four-week file being the more recent registry.
+- A station's name changes over time for 8 % of CNPJs and its brand for 23 %
+  (many of them the renaming of Petrobras Distribuidora to Vibra). The CNPJ is
+  the only stable key.
 
 ---
 
