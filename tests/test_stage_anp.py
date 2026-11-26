@@ -178,6 +178,19 @@ def test_whitespace_is_normalised_and_empty_text_becomes_null(tmp_path):
     assert staged["neighbourhood"] is None
 
 
+def test_brand_is_staged_in_upper_case(tmp_path):
+    """No rule can check an open list, so one brand must not come out in two spellings."""
+    days = ("05/10/2026", "06/10/2026")
+    rows = [
+        VALID | {"Data da Coleta": day, "Bandeira": brand}
+        for day, brand in zip(days, ("Raízen", "RAÍZEN"), strict=True)
+    ]
+    outcome = run(tmp_path, *rows)
+
+    assert [row["brand"] for row in outcome.staged] == ["RAÍZEN", "RAÍZEN"]
+    assert (outcome.errors, outcome.warnings) == ({}, {})
+
+
 def test_sale_price_keeps_the_decimals_it_was_published_with(tmp_path):
     days = ("05/10/2026", "06/10/2026", "07/10/2026")
     prices = ("5,99", "5,999", "6")
@@ -223,10 +236,12 @@ ONE_BROKEN_RULE = [
     ("sale_price_is_a_number", {"Valor de Venda": "5.99"}),
     ("sale_price_is_a_number", {"Valor de Venda": "5,9999"}),
     ("sale_price_is_a_number", {"Valor de Venda": ""}),
+    ("sale_price_is_a_number", {"Valor de Venda": "9" * 400}),  # would overflow a float
     ("sale_price_within_bounds", {"Valor de Venda": "599"}),
     ("sale_price_within_bounds", {"Valor de Venda": "0"}),
     ("purchase_price_is_a_number_or_empty", {"Valor de Compra": "n/d"}),
     ("purchase_price_is_a_number_or_empty", {"Valor de Compra": "4,12345"}),
+    ("purchase_price_is_a_number_or_empty", {"Valor de Compra": "9" * 400}),
 ]
 
 

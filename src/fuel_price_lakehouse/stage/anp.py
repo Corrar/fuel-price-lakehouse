@@ -15,13 +15,14 @@ Decisions that shape the rules:
 - A value that cannot be read is reported under the rule that names it
   (``collected_on_is_a_date``, ``sale_price_is_a_number``...). Rules that need
   the value let the row pass, so each rule counts a different problem.
-- Warning rules run on the rows that passed the error rules: ``_warnings`` and
-  the warning counts describe the staged table. It also means the weekly median
-  and the uniqueness of a key are worked out without rejected rows, exact
-  duplicates included.
+- Warning rules run on the rows that passed the error rules, so the weekly
+  median and the uniqueness of a key are worked out without rejected rows,
+  exact duplicates included.
 - Text is kept as published apart from whitespace: no case folding. A product
-  or a state written in another case would be quarantined and show up in the
-  report, not silently mapped.
+  or a state written in another case is quarantined and shows up in the report
+  instead of being silently mapped. The brand is the exception. It is an open
+  list that no rule can check, so it is upper-cased, as every brand in the
+  files is: a second spelling must not split one brand in two.
 """
 
 from __future__ import annotations
@@ -44,9 +45,9 @@ from fuel_price_lakehouse.reference import (
     UNIT_CUBIC_METRE,
 )
 from fuel_price_lakehouse.stage import cnpj, text
-from fuel_price_lakehouse.stage.model import SchemaDriftError, StagedFrames
+from fuel_price_lakehouse.stage.model import DATE, ID_LIST, SchemaDriftError, StagedFrames, split
 from fuel_price_lakehouse.stage.rules import Check as RowCheck
-from fuel_price_lakehouse.stage.rules import FileContext, Rule, Severity, evaluate
+from fuel_price_lakehouse.stage.rules import FileContext, Rule, Severity
 
 SOURCE_COLUMNS: tuple[str, ...] = (
     "Regiao - Sigla",
@@ -104,8 +105,6 @@ _HIGHEST_PRICE = {product: high for product, (_, high) in SALE_PRICE_BOUNDS.item
 
 _KEY = ["station_cnpj", "product", "collected_on"]
 _BLANK = "_blank"
-_DATE32 = pd.ArrowDtype(pa.date32())
-_ID_LIST = pd.ArrowDtype(pa.list_(pa.string()))
 
 
 def _file_period(kind: str, period: str) -> tuple[date, date] | None:
@@ -205,7 +204,7 @@ RULES: tuple[Rule, ...] = (
     ),
     _error(
         "state_is_known",
-        "The state is one of the 27 Brazilian state codes.",
+        "The state code is that of one of the 27 Brazilian states.",
         "A sigla do estado é a de uma das 27 unidades da federação.",
         lambda rows, _context: rows["state_code"].isin(list(REGION_OF_STATE)),
     ),
@@ -393,7 +392,7 @@ STAGED_SCHEMA = DataFrameSchema(
         "neighbourhood": Column(str, nullable=True),
         "postal_code": Column(str, Check.str_matches(r"^[0-9]{8}$"), nullable=True),
         "product": Column(str, Check.isin(list(PRODUCT_BY_ID))),
-        "collected_on": Column(_DATE32),
+        "collected_on": Column(DATE),
         "sale_price": Column("float64", Check.gt(0)),
         "purchase_price": Column("float64", Check.ge(0), nullable=True),
         "unit": Column(str, Check.isin(sorted(set(_UNIT_OF_PRODUCT.values())))),
@@ -404,7 +403,7 @@ STAGED_SCHEMA = DataFrameSchema(
         "_source_sha256": Column(str, Check.str_matches(r"^[0-9a-f]{64}$")),
         "_source_row_number": Column("int64", Check.ge(1)),
         "_ingested_at": Column("datetime64[us, UTC]"),
-        "_warnings": Column(_ID_LIST),
+        "_warnings": Column(ID_LIST),
     },
     strict=True,
     ordered=True,
@@ -414,33 +413,21 @@ STAGED_SCHEMA = DataFrameSchema(
 def stage(raw: pd.DataFrame, context: FileContext, *, now: Clock) -> StagedFrames:
     """Split one raw price file into staged rows and quarantined rows.
 
-    Every raw row comes out in exactly one of the two frames. The staged frame
-    has passed ``STAGED_SCHEMA``. A file whose header is not the 16 columns of
-    the ANP layout raises ``SchemaDriftError``.
+    Every raw row comes out in exactly one of the two frames. A file whose
+    header is not the 16 columns of the ANP layout raises ``SchemaDriftError``.
     """
     _check_header(raw, context)
-    rows = pd.concat([raw, _typed(raw, context)], axis=1)
-    errors = evaluate(_rules(Severity.ERROR), rows, context)
-    # An explicit bool: with no rows the mask has dtype object, which pandas
-    # would take for a list of column labels.
-    rejected = errors.rejected.astype(bool)
-    accepted = rows[~rejected]
-    warnings = evaluate(_rules(Severity.WARNING), accepted, context)
-
-    staged = accepted.assign(
-        collected_on=accepted["collected_on"].astype(_DATE32),
-        _warnings=warnings.warning_ids.astype(_ID_LIST),
+    frames = split(
+        pd.concat([raw, _typed(raw, context)], axis=1),
+        RULES,
+        context,
+        now=now,
+        staged_schema=STAGED_ARROW_SCHEMA,
+        quarantine_schema=QUARANTINE_ARROW_SCHEMA,
     )
-    quarantine = rows[rejected].assign(
-        _rule_ids=errors.error_ids[rejected].astype(_ID_LIST),
-        _quarantined_at=pd.Series(now(), index=rows.index[rejected], dtype="datetime64[us, UTC]"),
-    )
-    return StagedFrames(
-        staged=STAGED_SCHEMA.validate(_shaped(staged, STAGED_ARROW_SCHEMA)),
-        quarantine=_shaped(quarantine, QUARANTINE_ARROW_SCHEMA),
-        error_counts=errors.error_counts,
-        warning_counts=warnings.warning_counts,
-    )
+    # A staged table that breaks its contract is a bug here, not bad data: it raises.
+    STAGED_SCHEMA.validate(frames.staged)
+    return frames
 
 
 def _check_header(raw: pd.DataFrame, context: FileContext) -> None:
@@ -477,12 +464,10 @@ def _typed(raw: pd.DataFrame, context: FileContext) -> pd.DataFrame:
             "postal_code": postal_code.where(postal_code != _UNKNOWN_POSTAL_CODE),
             "product": source["Produto"],
             "collected_on": text.parse_date(source["Data da Coleta"]),
-            "sale_price": text.parse_decimal(source["Valor de Venda"], _SALE_PRICE_DECIMALS),
-            "purchase_price": text.parse_decimal(
-                source["Valor de Compra"], _PURCHASE_PRICE_DECIMALS
-            ),
+            "sale_price": _price(source["Valor de Venda"], _SALE_PRICE_DECIMALS),
+            "purchase_price": _price(source["Valor de Compra"], _PURCHASE_PRICE_DECIMALS),
             "unit": text.map_distinct(source["Unidade de Medida"], _UNIT_OF_SOURCE_TEXT.get),
-            "brand": source["Bandeira"],
+            "brand": source["Bandeira"].str.upper(),
             "_source_kind": pd.Series(context.details["kind"], index=raw.index, dtype="str"),
             "_source_period": pd.Series(context.details["period"], index=raw.index, dtype="str"),
             "_source_row_number": raw["_row_number"],
@@ -492,10 +477,5 @@ def _typed(raw: pd.DataFrame, context: FileContext) -> pd.DataFrame:
     )
 
 
-def _rules(severity: Severity) -> list[Rule]:
-    return [rule for rule in RULES if rule.severity is severity]
-
-
-def _shaped(frame: pd.DataFrame, schema: pa.Schema) -> pd.DataFrame:
-    """Exactly the columns of ``schema``, in its order, with a fresh index."""
-    return frame[schema.names].reset_index(drop=True)
+def _price(values: pd.Series, max_decimals: int) -> pd.Series:
+    return text.parse_decimal(values, separator=",", max_decimals=max_decimals)

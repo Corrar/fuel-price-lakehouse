@@ -5,7 +5,7 @@ with the date and the value still as text. Here every row either becomes a
 typed observation in the staged layer or is kept, untouched, in quarantine
 together with the ids of the rules it broke.
 
-Three decisions shape the rules:
+Two decisions shape the rules:
 
 - A date that cannot be read is reported once, under ``observed_on_is_a_date``.
   The rules that need the date let such a row pass, so each rule counts a
@@ -13,11 +13,11 @@ Three decisions shape the rules:
 - When a window carries the same date twice, every row of that date is
   rejected. Nothing in the response says which value is the right one, and a
   gap in a series is visible where a wrong value is not.
-- Warning rules run on the rows that passed the error rules: ``_warnings`` and
-  the warning counts describe the staged table, not the rejected rows.
 """
 
 from __future__ import annotations
+
+from datetime import UTC
 
 import numpy as np
 import pandas as pd
@@ -26,17 +26,10 @@ from pandera.pandas import Check, Column, DataFrameSchema
 
 from fuel_price_lakehouse.config import Clock
 from fuel_price_lakehouse.stage import text
-from fuel_price_lakehouse.stage.model import SchemaDriftError, StagedFrames
-from fuel_price_lakehouse.stage.rules import FileContext, Rule, Severity, evaluate
+from fuel_price_lakehouse.stage.model import DATE, ID_LIST, SchemaDriftError, StagedFrames, split
+from fuel_price_lakehouse.stage.rules import FileContext, Rule, Severity
 
 SOURCE_COLUMNS: tuple[str, ...] = ("data", "valor")
-
-# The API writes numbers with a dot, and a sign only when negative (the IPCA
-# has months of deflation). Anything else is not guessed at.
-_NUMBER_TEXT = r"-?[0-9]+(\.[0-9]+)?"
-
-_DATE32 = pd.ArrowDtype(pa.date32())
-_ID_LIST = pd.ArrowDtype(pa.list_(pa.string()))
 
 
 def _within_window_year(frame: pd.DataFrame, context: FileContext) -> pd.Series:
@@ -50,7 +43,9 @@ def _date_unique(frame: pd.DataFrame, _context: FileContext) -> pd.Series:
 
 
 def _not_in_future(frame: pd.DataFrame, context: FileContext) -> pd.Series:
-    return frame["observed_on"] <= pd.Timestamp(context.collected_at.date())
+    # The collection day in UTC is never behind the day in Brazil, where the series is dated.
+    collected_on = pd.Timestamp(context.collected_at.astimezone(UTC).date())
+    return frame["observed_on"] <= collected_on
 
 
 RULES: tuple[Rule, ...] = (
@@ -123,13 +118,13 @@ QUARANTINE_ARROW_SCHEMA = pa.schema(
 STAGED_SCHEMA = DataFrameSchema(
     {
         "series_code": Column("int32", Check.gt(0)),
-        "observed_on": Column(_DATE32),
+        "observed_on": Column(DATE),
         "value": Column("float64"),
         "_source_url": Column(str),
         "_source_sha256": Column(str, Check.str_matches(r"^[0-9a-f]{64}$")),
         "_source_row_number": Column("int64", Check.ge(1)),
         "_ingested_at": Column("datetime64[us, UTC]"),
-        "_warnings": Column(_ID_LIST),
+        "_warnings": Column(ID_LIST),
     },
     strict=True,
     ordered=True,
@@ -145,53 +140,33 @@ def stage(raw: pd.DataFrame, context: FileContext, *, now: Clock) -> StagedFrame
         raise SchemaDriftError(
             f"{context.key}: source columns {missing} not found; the file has {list(raw.columns)}"
         )
-    candidates = _candidates(raw, context)
-    errors = evaluate(_rules(Severity.ERROR), candidates, context)
-    # An explicit bool: with no rows the mask has dtype object, which pandas
-    # would take for a list of column labels.
-    rejected = errors.rejected.astype(bool)
-    accepted = candidates[~rejected]
-    warnings = evaluate(_rules(Severity.WARNING), accepted, context)
-
-    staged = accepted.assign(
-        observed_on=accepted["observed_on"].astype(_DATE32),
-        _warnings=warnings.warning_ids.astype(_ID_LIST),
+    frames = split(
+        _candidates(raw, context),
+        RULES,
+        context,
+        now=now,
+        staged_schema=STAGED_ARROW_SCHEMA,
+        quarantine_schema=QUARANTINE_ARROW_SCHEMA,
     )
-    quarantine = candidates[rejected].assign(
-        _rule_ids=errors.error_ids[rejected].astype(_ID_LIST), _quarantined_at=now()
-    )
-    return StagedFrames(
-        staged=STAGED_SCHEMA.validate(_shaped(staged, STAGED_ARROW_SCHEMA)),
-        quarantine=_shaped(quarantine, QUARANTINE_ARROW_SCHEMA),
-        error_counts=errors.error_counts,
-        warning_counts=warnings.warning_counts,
-    )
+    # A staged table that breaks its contract is a bug here, not bad data: it raises.
+    STAGED_SCHEMA.validate(frames.staged)
+    return frames
 
 
 def _candidates(raw: pd.DataFrame, context: FileContext) -> pd.DataFrame:
     """Every raw row with what its text would be once typed: missing where it is not valid."""
-    value_text = raw["valor"]
-    values = pd.to_numeric(value_text.where(value_text.str.fullmatch(_NUMBER_TEXT)))
     return pd.DataFrame(
         {
             "data": raw["data"],
-            "valor": value_text,
+            "valor": raw["valor"],
             "series_code": np.int32(int(context.details["series"])),
             "observed_on": text.parse_date(raw["data"]),
-            # An explicit type: a window with no valid number would otherwise infer its own.
-            "value": values.astype("float64"),
+            # The API writes numbers with a dot, and a sign only when negative
+            # (the IPCA has months of deflation).
+            "value": text.parse_decimal(raw["valor"], separator=".", signed=True),
             "_source_url": raw["_source_url"],
             "_source_sha256": raw["_source_sha256"],
             "_source_row_number": raw["_row_number"],
             "_ingested_at": raw["_collected_at"],
         }
     )
-
-
-def _rules(severity: Severity) -> list[Rule]:
-    return [rule for rule in RULES if rule.severity is severity]
-
-
-def _shaped(frame: pd.DataFrame, schema: pa.Schema) -> pd.DataFrame:
-    """Exactly the columns of ``schema``, in its order, with a fresh index."""
-    return frame[schema.names].reset_index(drop=True)

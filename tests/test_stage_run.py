@@ -2,7 +2,8 @@
 
 Raw files come from a real collection against the fake sources. SGS windows go
 through the real SGS stager; ANP files go through a small stand-in, because all
-the driver knows about a source is the stager registered for it.
+the driver knows about a source is the stager registered for it. The last test
+runs both real stagers, to show that they and the driver fit together.
 """
 
 from __future__ import annotations
@@ -20,7 +21,7 @@ import pytest
 from fuel_price_lakehouse.collect.run import run as collect
 from fuel_price_lakehouse.config import Clock
 from fuel_price_lakehouse.layout import manifest_path, staging_state_path
-from fuel_price_lakehouse.stage import bcb_sgs
+from fuel_price_lakehouse.stage import anp, bcb_sgs
 from fuel_price_lakehouse.stage import run as driver
 from fuel_price_lakehouse.stage.model import SchemaDriftError, StagedFrames
 from fuel_price_lakehouse.stage.rules import FileContext
@@ -284,8 +285,6 @@ def test_run_before_any_collection_has_nothing_to_do(tmp_path):
 
 
 def test_registry_resolves_the_staging_module_of_each_source():
-    anp = pytest.importorskip("fuel_price_lakehouse.stage.anp")
-
     assert driver.STAGERS["bcb_sgs"]() is bcb_sgs
     assert driver.STAGERS["anp"]() is anp
 
@@ -580,3 +579,34 @@ def test_state_is_saved_after_each_file(web, tmp_path, fast, monkeypatch):
     assert set(state(tmp_path)) == {DOLLAR}
 
     assert actions(stage(tmp_path)) == {DOLLAR: "unchanged", IPCA: "staged"}
+
+
+# --- the real stagers ----------------------------------------------------------------------------
+
+
+def test_real_stagers_write_their_published_tables_through_the_driver(web, tmp_path, fast):
+    """Columns, order and types are the ones each staging module declares."""
+    collect_raw(web, tmp_path, fast, BOTH)
+
+    outcomes = stage(tmp_path)
+
+    assert set(actions(outcomes).values()) == {"staged"}
+    entries = state(tmp_path)
+    for key, module in ((OCTOBER_DIESEL, anp), (FOUR_WEEKS, anp), (DOLLAR, bcb_sgs)):
+        staged = pq.read_schema(tmp_path / entries[key]["staged_path"])
+        assert staged.equals(module.STAGED_ARROW_SCHEMA), key
+    assert [
+        (row["station_cnpj"], row["sale_price"], row["_source_kind"], row["_source_period"])
+        for row in rows(tmp_path, entries[OCTOBER_DIESEL]["staged_path"])
+    ] == [
+        ("11222333000181", 6.01, "monthly", "2026-10"),
+        ("11222333000181", 6.02, "monthly", "2026-10"),
+    ]
+    # The fake LPG file prices petrol at 109,99: outside the bounds, so its only row is rejected.
+    lpg = entries[OCTOBER_LPG]
+    assert (lpg["staged_path"], lpg["rows_staged"], lpg["rows_quarantined"]) == (None, 0, 1)
+    assert lpg["rule_failures"]["sale_price_within_bounds"] == 1
+    quarantine = pq.read_schema(tmp_path / lpg["quarantine_path"])
+    assert quarantine.equals(anp.QUARANTINE_ARROW_SCHEMA)
+    assert sum(entry["rows_read"] for entry in entries.values()) == 11
+    assert set(actions(stage(tmp_path)).values()) == {"unchanged"}

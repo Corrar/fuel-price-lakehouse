@@ -125,7 +125,9 @@ def test_row_without_a_real_date_goes_to_quarantine(tmp_path, text):
     assert result.quarantine[0]["data"] == text  # kept exactly as it came
 
 
-@pytest.mark.parametrize("text", ["0,70", "", None, "n/d", "1e3", "nan", " 0.70", ".70", "+0.70"])
+@pytest.mark.parametrize(
+    "text", ["0,70", "", None, "n/d", "1e3", "nan", " 0.70", ".70", "+0.70", "9" * 400]
+)
 def test_row_whose_value_is_not_a_number_goes_to_quarantine(tmp_path, text):
     result = stage(tmp_path, [JANUARY, {"data": "01/02/2026", "valor": text}])
 
