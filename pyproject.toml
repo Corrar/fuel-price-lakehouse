@@ -4,6 +4,8 @@ version = "0.0.1"
 description = "Weekly incremental pipeline for Brazilian fuel prices (ANP) and macro series (Banco Central SGS): raw, staged, quarantine and curated Parquet layers with a published data quality report."
 readme = "README.md"
 requires-python = ">=3.12"
+license = "MIT"
+license-files = ["LICENSE"]
 dependencies = []
 
 [dependency-groups]
