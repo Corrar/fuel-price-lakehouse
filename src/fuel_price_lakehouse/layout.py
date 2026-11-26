@@ -20,7 +20,7 @@ class Layer(StrEnum):
     """Pipeline layers, in the order data flows through them."""
 
     RAW = "raw"
-    """Files exactly as downloaded. Never modified."""
+    """A faithful copy of each downloaded file: every value as text, never modified."""
 
     STAGED = "staged"
     """Typed and normalised rows that passed every validation rule."""
@@ -42,6 +42,16 @@ class Source(StrEnum):
 def layer_dir(layer: Layer, source: Source, root: Path = DEFAULT_DATA_ROOT) -> Path:
     """Directory holding everything from ``source`` at ``layer``."""
     return root / layer.value / source.value
+
+
+def manifest_path(root: Path = DEFAULT_DATA_ROOT) -> Path:
+    """The collection manifest: one record per upstream file already ingested."""
+    return root / "manifest" / "collection.json"
+
+
+def downloads_dir(root: Path = DEFAULT_DATA_ROOT) -> Path:
+    """Scratch space for files being downloaded. Safe to delete at any time."""
+    return root / "tmp" / "downloads"
 
 
 def partition_dir(

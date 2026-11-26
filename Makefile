@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help install lint format test check clean
+.PHONY: help install lint format test check extract clean
 
 help: ## Show available targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "} {printf "  %-10s %s\n", $$1, $$2}'
@@ -19,6 +19,9 @@ test: ## Run the test suite
 	uv run pytest
 
 check: lint test ## Everything CI runs
+
+extract: ## Collect what is new into the raw layer (SINCE=YYYY-MM sets the first month)
+	uv run python -m fuel_price_lakehouse.extract $(if $(SINCE),--since $(SINCE)) $(ARGS)
 
 clean: ## Remove caches and build output (never touches data/)
 	rm -rf .pytest_cache .ruff_cache dist build
