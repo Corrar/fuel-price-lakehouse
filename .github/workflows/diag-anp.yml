@@ -7,16 +7,37 @@ permissions: {}
 jobs:
   probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
-      - name: Probe
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
+      - run: uv sync --locked --no-dev
+      - name: Probe from Python
         run: |
-          page="https://www.gov.br/anp/pt-br/centrais-de-conteudo/dados-abertos/serie-historica-de-precos-de-combustiveis"
-          probe() { curl -sS -o /dev/null --max-time 30 -w '%{http_code} ip=%{remote_ip} tcp=%{time_connect}s tls=%{time_appconnect}s\n' "$@" || true; }
-          echo "== ANP page, curl default UA";  probe "$page"
-          echo "== ANP page, httpx UA";          probe -A "python-httpx/0.28.1" "$page"
-          echo "== ANP page, browser-like UA";   probe -A "Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0" "$page"
-          echo "== gov.br home";                 probe https://www.gov.br/
-          echo "== Banco Central API";           probe "https://api.bcb.gov.br/dados/serie/bcdata.sgs.1/dados/ultimos/1?formato=json"
-          echo "== DNS";                         getent ahosts www.gov.br | head -3
-          echo "== verbose";                     curl -v -o /dev/null --max-time 30 "$page" 2>&1 | grep -E '^\* |^< HTTP' | head -25 || true
+          uv run --no-sync python - <<'PY'
+          import socket, ssl, sys, time, urllib.request
+          import httpx
+          from fuel_price_lakehouse.collect.anp import LANDING_PAGE as page
+          from fuel_price_lakehouse.collect.http import default_client
+          print(sys.version, ssl.OPENSSL_VERSION, httpx.__version__)
+          def attempt(label, call):
+              start = time.monotonic()
+              try:
+                  result = call()
+                  print(f"{label}: OK {result} in {time.monotonic() - start:.1f}s")
+              except Exception as error:
+                  print(f"{label}: {type(error).__name__}: {error} after {time.monotonic() - start:.1f}s")
+          attempt("httpx default_client", lambda: default_client().get(page).status_code)
+          attempt("httpx plain", lambda: httpx.get(page, timeout=30).status_code)
+          attempt("urllib", lambda: urllib.request.urlopen(page, timeout=30).status)
+          v4 = httpx.HTTPTransport(local_address="0.0.0.0")
+          attempt("httpx IPv4 only", lambda: httpx.Client(transport=v4, timeout=30).get(page).status_code)
+          ctx = ssl.create_default_context(); ctx.maximum_version = ssl.TLSVersion.TLSv1_2
+          attempt("httpx TLS 1.2", lambda: httpx.get(page, timeout=30, verify=ctx).status_code)
+          ctx2 = ssl.create_default_context(); ctx2.set_ciphers("DEFAULT")
+          attempt("httpx DEFAULT ciphers", lambda: httpx.get(page, timeout=30, verify=ctx2).status_code)
+          attempt("httpx BCB", lambda: httpx.get("https://api.bcb.gov.br/dados/serie/bcdata.sgs.1/dados/ultimos/1?formato=json", timeout=30).status_code)
+          attempt("httpx default_client again", lambda: default_client().get(page).status_code)
+          PY
