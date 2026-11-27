@@ -302,8 +302,12 @@ export function mountStates(root, { model, goTo }) {
       }),
     );
     if (!withData.length) rank.append(h("li", { class: "empty" }, t("st.none.week")));
-    rankNote.textContent = without.length ? t("st.rank.missing", { n: without.length, list: without.map((r) => r.st.code).join(", "), min: model.meta.min_stations_published ?? "—" }) : "";
-    rankNote.hidden = !without.length;
+    // A week without an ANP survey has no national value either: say so, and do
+    // not blame suppression for it.
+    const surveyed = model.national[state.fuel]?.mean?.[i] != null;
+    if (!surveyed) rankNote.textContent = t("st.rank.nosurvey");
+    else rankNote.textContent = without.length ? t("st.rank.missing", { n: without.length, list: without.map((r) => r.st.code).join(", "), min: model.meta.min_stations_published ?? "—" }) : "";
+    rankNote.hidden = !rankNote.textContent;
     rovingFocus(rank, ".rank-row");
 
     if (keep) {

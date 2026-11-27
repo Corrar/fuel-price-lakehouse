@@ -151,6 +151,10 @@ export const STRINGS = {
     "Em 12 meses, a média nacional variou {nominal} em valores correntes e {real} descontada a inflação (IPCA).",
     "Over 12 months the national average moved {nominal} in current prices and {real} after inflation (IPCA).",
   ],
+  "ov.dek.year.provisional": [
+    "Em 12 meses, a média nacional variou {nominal} em valores correntes e cerca de {real} descontada a inflação: provisório, porque o IPCA de {month} ainda não saiu e a conta usa a inflação dos 12 meses até {reference}.",
+    "Over 12 months the national average moved {nominal} in current prices and about {real} after inflation: provisional, because the IPCA for {month} is not out yet and the figure uses inflation over the 12 months to {reference}.",
+  ],
   "ov.dek.base": [
     "O número é a média de {stations} postos em {states} unidades da federação, pesquisados na semana de {week}.",
     "The figure is the average of {stations} stations in {states} states, surveyed in the week of {week}.",
@@ -184,6 +188,10 @@ export const STRINGS = {
     "Variações sobre a semana anterior e sobre 52 semanas antes; “real” desconta o IPCA (preços de {month}). Médias simples dos postos pesquisados: a ANP pondera as médias nacional e estaduais pelo volume de vendas, por isso os boletins oficiais diferem um pouco. Dólar: média semanal da cotação de venda.",
     "Changes against the previous week and 52 weeks earlier; “real” removes IPCA inflation ({month} prices). Simple means over the surveyed stations: ANP weights its national and state averages by sales volume, so its bulletins differ slightly. Dollar: weekly average of the sell rate.",
   ],
+  "ov.board.provisional": [
+    "* O IPCA de {month} ainda não foi divulgado: a variação real usa a inflação dos 12 meses até {reference} e é provisória.",
+    "* The IPCA for {month} is not out yet: the real change uses inflation over the 12 months to {reference} and is provisional.",
+  ],
   "ov.tot.lead": ["A base, desde {since}", "The dataset, since {since}"],
   "ov.tot.observations": ["preços coletados", "prices collected"],
   "ov.tot.stations": ["postos pesquisados", "stations surveyed"],
@@ -192,8 +200,8 @@ export const STRINGS = {
   "ov.pr.title": ["O que é este projeto", "What this project is"],
   "ov.pr.auto.lead": ["Um pipeline automático.", "An automated pipeline."],
   "ov.pr.auto": [
-    "Toda semana, o GitHub Actions coleta os preços que a ANP pesquisa nos postos e as séries de dólar e IPCA do Banco Central, e reconstrói este painel.",
-    "Every week, GitHub Actions collects the prices ANP surveys at the stations and the dollar and IPCA series from Banco Central, and rebuilds this dashboard.",
+    "Duas vezes por semana, o GitHub Actions coleta os preços que a ANP pesquisa nos postos e as séries de dólar e IPCA do Banco Central, e reconstrói este painel.",
+    "Twice a week, GitHub Actions collects the prices ANP surveys at the stations and the dollar and IPCA series from Banco Central, and rebuilds this dashboard.",
   ],
   "ov.pr.quarantine.lead": ["Quarentena, não exclusão.", "Quarantine, not deletion."],
   "ov.pr.quarantine.plain": [
@@ -201,8 +209,8 @@ export const STRINGS = {
     "Every row goes through validation rules; one that breaks a rule goes to quarantine with the reason, and is never deleted.",
   ],
   "ov.pr.quarantine": [
-    "Cada linha passa por {n} regras; a que quebra uma delas vai para a quarentena com o motivo, nunca é apagada.",
-    "Every row goes through {n} rules; one that breaks a rule goes to quarantine with the reason, and is never deleted.",
+    "Cada linha da ANP passa por {n} regras; a que quebra uma das {errors} regras de erro vai para a quarentena com o motivo, nunca é apagada, e as demais só a sinalizam.",
+    "Every ANP row goes through {n} rules; one that breaks any of the {errors} error rules goes to quarantine with the reason, and is never deleted; the others only flag it.",
   ],
   "ov.pr.gate.lead": ["Um portão de qualidade.", "A quality gate."],
   "ov.pr.gate.plain": [
@@ -324,9 +332,10 @@ export const STRINGS = {
   ],
   "st.rank.unit": ["barras: desvio % em relação à média nacional", "bars: % deviation from the national average"],
   "st.rank.missing": [
-    "Sem dado nesta semana ({n}): {list}. Agregados com menos de {min} postos não são publicados.",
-    "No value this week ({n}): {list}. Aggregates with fewer than {min} stations are not published.",
+    "Sem dado nesta semana ({n}): {list}. Não pesquisados, ou suprimidos por ter menos de {min} postos.",
+    "No value this week ({n}): {list}. Not surveyed, or suppressed because fewer than {min} stations.",
   ],
+  "st.rank.nosurvey": ["A ANP não publicou pesquisa nesta semana.", "ANP published no survey for this week."],
   "st.action.hint": ["Clique num estado para destacá-lo e compará-lo com o Brasil.", "Click a state to highlight it and compare it with Brazil."],
   "st.action.selected": ["em destaque", "highlighted"],
   "st.action.compare": ["Comparar {name} com o Brasil no histórico", "Compare {name} with Brazil in the history"],
@@ -468,7 +477,10 @@ export const STRINGS = {
   "qa.funnel.quarantine": ["Quarentena", "Quarantine"],
   "qa.funnel.quarantine.note": ["{pct} das brutas, guardadas com a regra que quebraram", "{pct} of raw rows, kept with the rule they broke"],
   "qa.funnel.curated": ["Linhas curadas", "Curated rows"],
-  "qa.funnel.curated.note": ["uma por posto, produto e data de coleta", "one per station, product and collection date"],
+  "qa.funnel.curated.note": [
+    "preços da ANP (um por posto, produto e data de coleta), cotações diárias do dólar e meses de IPCA",
+    "ANP prices (one per station, product and collection date), daily dollar rates and IPCA months",
+  ],
   "qa.funnel.duplicates": ["Repetições removidas", "Repeated rows removed"],
   "qa.funnel.duplicates.note": ["a mesma coleta publicada em mais de um arquivo; {n} com preço divergente", "the same observation published more than once; {n} with a conflicting price"],
   "qa.invariant.ok": ["Confere", "Balanced"],
@@ -583,8 +595,8 @@ export const STRINGS = {
   "ab.kicker": ["Como funciona", "How it works"],
   "ab.title": ["Um pipeline pequeno, automático e auditável", "A small, automatic, auditable pipeline"],
   "ab.what.1": [
-    "Toda semana, este projeto coleta os preços que a ANP pesquisa em milhares de postos e as séries de câmbio e inflação do Banco Central.",
-    "Every week this project collects the prices ANP surveys at thousands of stations, along with the exchange-rate and inflation series from Banco Central.",
+    "Duas vezes por semana, este projeto coleta os preços que a ANP pesquisa em milhares de postos e as séries de câmbio e inflação do Banco Central.",
+    "Twice a week this project collects the prices ANP surveys at thousands of stations, along with the exchange-rate and inflation series from Banco Central.",
   ],
   "ab.what.2": [
     "Cada linha passa por regras de validação: a que quebra uma regra vai para a quarentena, com o motivo, e as demais viram tabelas prontas para análise.",
@@ -638,8 +650,8 @@ export const STRINGS = {
   ],
   "ab.g.idempotent": ["Idempotente", "Idempotent"],
   "ab.g.idempotent.text": [
-    "Rodar duas vezes seguidas não baixa nem regrava nada. Um arquivo só é revalidado se o conteúdo bruto ou a versão das regras mudar.",
-    "Running it twice in a row downloads nothing and rewrites nothing. A file is validated again only when its raw content or the rules version changes.",
+    "Rodar duas vezes seguidas não baixa nada e produz tabelas idênticas. Um arquivo só é revalidado se o conteúdo bruto ou a versão das regras mudar.",
+    "Running it twice in a row downloads nothing and produces identical tables. A file is validated again only when its raw content or the rules version changes.",
   ],
   "ab.g.quarantine": ["Quarentena, não descarte", "Quarantine, not drop"],
   "ab.g.quarantine.text": [
@@ -648,8 +660,8 @@ export const STRINGS = {
   ],
   "ab.g.contracts": ["Contratos", "Contracts"],
   "ab.g.contracts.text": [
-    "Cada camada tem um esquema declarado (Pandera). Quebra de contrato interrompe a execução, e uma verificação de erro que falha impede a publicação.",
-    "Each layer has a declared schema (Pandera). A contract violation stops the run, and a failing error check prevents publication.",
+    "Cada fronteira tem um contrato verificado: Pandera nas tabelas validadas, verificações em DuckDB nas tabelas curadas, em Python nos arquivos do site. Quebra de contrato interrompe a execução, e uma verificação de erro que falha impede a publicação.",
+    "Every boundary has a checked contract: Pandera on the staged tables, DuckDB checks on the curated tables, Python checks on the site files. A contract violation stops the run, and a failing error check prevents publication.",
   ],
   "ab.g.cost": ["Custo zero", "Zero cost"],
   "ab.g.cost.text": [

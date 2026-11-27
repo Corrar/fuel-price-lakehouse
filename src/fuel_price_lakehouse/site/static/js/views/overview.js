@@ -7,7 +7,7 @@
 import { h } from "../dom.js";
 import { t, fmt, productLabel, productInline, unitLabel, unitPhrase } from "../i18n.js";
 import { parseIsoDate, toDate, fileOf } from "../data.js";
-import { latestStats, latestChange, endOfWeek, stateRows } from "../series.js";
+import { latestStats, latestChange, endOfWeek, stateRows, weekMonth } from "../series.js";
 import { sparkline } from "../charts.js";
 import { linkTo } from "../state.js";
 import { delta, statusBadge, credit, viewLink, missingFile } from "../ui.js";
@@ -26,7 +26,13 @@ function headline(product, stats) {
 
 function standfirst(model, stats) {
   const parts = [];
-  if (stats.year != null) parts.push(t("ov.dek.year", { nominal: fmt.pct(stats.year, 1, true), real: fmt.pct(stats.yearReal, 1, true) }));
+  if (stats.year != null) {
+    const figures = { nominal: fmt.pct(stats.year, 1, true), real: fmt.pct(stats.yearReal, 1, true) };
+    if (stats.yearRealProvisional) {
+      Object.assign(figures, { month: fmt.month(weekMonth(model.dates[stats.index])), reference: fmt.month(model.meta.ipca_reference_month) });
+    }
+    parts.push(t(stats.yearRealProvisional ? "ov.dek.year.provisional" : "ov.dek.year", figures));
+  }
   if (stats.stations != null) {
     parts.push(t("ov.dek.base", { stations: fmt.int(stats.stations), states: stats.states ?? "—", week: fmt.week(model.dates[stats.index]) }));
   }
@@ -36,7 +42,9 @@ function standfirst(model, stats) {
 /** What the project is, in the first screen: the reason this page exists. */
 function projectBox(model, goTo) {
   const quality = model.quality;
-  const rules = Array.isArray(quality?.rules) ? quality.rules.length : 0;
+  // A row is judged by the rules of its own source: count ANP's, the source of the prices.
+  const anpRules = Array.isArray(quality?.rules) ? quality.rules.filter((r) => r.source === "anp") : [];
+  const errorRules = anpRules.filter((r) => r.severity === "error").length;
   const checks = Array.isArray(quality?.checks) ? quality.checks : [];
   const passed = checks.filter((c) => c.status === "pass").length;
   const item = (key, text) => h("li", null, h("strong", null, t(`ov.pr.${key}.lead`)), " ", text);
@@ -48,7 +56,7 @@ function projectBox(model, goTo) {
       "ul",
       { class: "project-list", role: "list" },
       item("auto", t("ov.pr.auto")),
-      item("quarantine", rules ? t("ov.pr.quarantine", { n: rules }) : t("ov.pr.quarantine.plain")),
+      item("quarantine", anpRules.length ? t("ov.pr.quarantine", { n: anpRules.length, errors: errorRules }) : t("ov.pr.quarantine.plain")),
       item("gate", checks.length ? t("ov.pr.gate", { n: checks.length, pass: passed }) : t("ov.pr.gate.plain")),
     ),
     h(
@@ -109,9 +117,11 @@ function board(model, goTo) {
     h("th", { scope: "col", class: "col-spark" }, t("ov.col.trend")),
   );
   const rows = [];
+  let provisional = null;
   for (const product of model.products) {
     const stats = latestStats(model, product.id);
     if (!stats) continue;
+    if (stats.yearRealProvisional) provisional ??= weekMonth(model.dates[stats.index]);
     const values = model.national[product.id].mean;
     rows.push(
       h(
@@ -126,7 +136,13 @@ function board(model, goTo) {
         h("td", { class: "num b-price" }, fmt.price(stats.price, product.unit)),
         h("td", { class: "num", "data-label": t("ov.col.week") }, delta(stats.week)),
         h("td", { class: "num", "data-label": t("ov.col.year") }, delta(stats.year)),
-        h("td", { class: "num", "data-label": t("ov.col.real") }, delta(stats.yearReal)),
+        h(
+          "td",
+          { class: "num", "data-label": t("ov.col.real"), title: stats.yearRealProvisional ? t("tip.provisional") : null },
+          delta(stats.yearReal),
+          stats.yearRealProvisional ? h("span", { class: "prov-mark", "aria-hidden": "true" }, "*") : null,
+          stats.yearRealProvisional ? h("span", { class: "sr-only" }, ` (${t("tip.provisional")})`) : null,
+        ),
         h("td", { class: "col-spark" }, sparkline(values.slice(Math.max(0, stats.index - 52), stats.index + 1))),
       ),
     );
@@ -158,7 +174,11 @@ function board(model, goTo) {
     { class: "board" },
     h("h2", { class: "board-title" }, t("ov.board.title")),
     h("table", { class: "board-table" }, h("caption", { class: "sr-only" }, t("ov.board.caption")), h("thead", null, head), h("tbody", null, rows)),
-    h("p", { class: "fig-source" }, `${t("ov.board.note", { month })} ${credit("anp", "bcb")}`),
+    h(
+      "p",
+      { class: "fig-source" },
+      [t("ov.board.note", { month }), provisional ? t("ov.board.provisional", { month: fmt.month(provisional), reference: month }) : null, credit("anp", "bcb")].filter(Boolean).join(" "),
+    ),
   );
 }
 

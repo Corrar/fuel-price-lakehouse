@@ -211,6 +211,8 @@
 html {
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
+  /* Keyboard focus and anchor jumps stop below the sticky section nav. */
+  scroll-padding-top: 64px;
 }
 body {
   margin: 0;
@@ -573,10 +575,11 @@ main[data-state="error"] .sec {
   padding: 0 16px;
 }
 /* Space between sections is a margin, so that jumping to a section lands on
-   its heading rule, just below the sticky nav. */
+   its heading rule, just below the sticky nav (the html scroll padding clears
+   the nav; this adds a little air). */
 .sec {
   margin-top: clamp(64px, 8vw, 112px);
-  scroll-margin-top: 76px;
+  scroll-margin-top: 12px;
 }
 .sec-overview {
   margin-top: clamp(28px, 4.5vw, 60px);
@@ -3046,4 +3049,11 @@ th[aria-sort="ascending"] .sort-mark {
   .tip-key {
     forced-color-adjust: none;
   }
+}
+
+/* A provisional figure: the month's IPCA is not out yet (see the table note). */
+.prov-mark {
+  margin-left: 2px;
+  color: var(--ink-3);
+  font-weight: 600;
 }

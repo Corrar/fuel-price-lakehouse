@@ -35,7 +35,7 @@ function severityTag(severity, scope = "sev") {
 
 /** A share of rows; a non-zero share that would round to zero is shown as "< 0.001%". */
 function sharePct(share) {
-  if (!share) return "—";
+  if (share == null) return "—";
   return share < 0.000005 ? `< ${fmt.pct(0.00001, 3)}` : fmt.pct(share, 3);
 }
 

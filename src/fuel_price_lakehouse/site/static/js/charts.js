@@ -21,6 +21,8 @@ import { showTip, hideTip, claimCrosshair, releaseCrosshair } from "./tooltip.js
 import { addEventMarkers } from "./chart-events.js";
 
 const DAY_MS = 86_400_000;
+/** Beyond this many weeks before the end of the window, a line's end gets no label. */
+const STALE_LABEL_WEEKS = 13;
 const FONT_FAMILY = '"IBM Plex Sans", system-ui, sans-serif';
 const SYMBOLS = { pass: d3.symbolCircle, warn: d3.symbolTriangle, fail: d3.symbolSquare };
 
@@ -49,6 +51,14 @@ function timeAxis(first, last, plotWidth) {
   if (yearly && first.getUTCMonth() === 0 && first.getUTCDate() <= 14 && !isYearStart(first)) {
     const step = ticks.length > 1 ? ticks[1].getUTCFullYear() - ticks[0].getUTCFullYear() : 1;
     if (step === 1 && (!ticks.length || ticks[0].getUTCFullYear() > first.getUTCFullYear())) ticks = [first, ...ticks];
+  }
+  // Ticks finer than a day (the run history of a young dashboard) would repeat
+  // the same day label: tick by whole days instead, or once within a single day.
+  if (!yearly && ticks.some((d) => d.getTime() % DAY_MS !== 0)) {
+    const days = Math.ceil((last - first) / DAY_MS);
+    const step = Math.max(1, Math.ceil(days / Math.max(2, Math.floor(plotWidth / 84))));
+    ticks = d3.utcDay.every(step).range(d3.utcDay.ceil(first), new Date(last.getTime() + 1));
+    if (!ticks.length) ticks = [first];
   }
   const monthly = ticks.every((d) => d.getUTCDate() === 1);
   const format = (date, index) => {
@@ -153,9 +163,15 @@ export function timeChart(host, config) {
     for (const sr of lead) {
       const li = lastValid(sr.values, i1);
       if (li < i0) continue;
+      // A series that ends before the others (its latest weeks suppressed) keeps
+      // its label only with the date of that value, and none once the line
+      // visibly stops months earlier: an undated label reads as this week's.
+      if (i1 - li > STALE_LABEL_WEEKS) continue;
       const name = mode === "value" ? "" : (sr.short ?? sr.label);
       const value = mode === "name" ? "" : yFormat(sr.values[li]);
-      ends.push({ sr, li, name, value, w: textWidth(name, 12, 600) + textWidth(value, 12) + (name && value ? 5 : 0) });
+      const when = li < i1 ? `· ${fmt.dayMonth(dates[li])}` : "";
+      const w = textWidth(name, 12, 600) + textWidth(value, 12) + (name && value ? 5 : 0) + (when ? textWidth(when, 12) + 4 : 0);
+      ends.push({ sr, li, name, value, when, w });
     }
   }
   const labelWidth = ends.length ? Math.max(...ends.map((e) => e.w)) : 0;
@@ -334,7 +350,8 @@ export function timeChart(host, config) {
       group.append("circle").attr("cx", end.x).attr("cy", end.y).attr("r", 4).attr("fill", end.sr.color).attr("stroke", tk.paper).attr("stroke-width", 2);
       const text = group.append("text").attr("x", end.x + 11).attr("y", end.ly).attr("dy", "0.35em").attr("text-anchor", "start").attr("fill", tk.ink).attr("font-size", 12);
       if (end.name) text.append("tspan").attr("font-weight", 600).text(end.name);
-      if (end.value) text.append("tspan").attr("dx", end.name ? 5 : 0).attr("fill", end.name ? tk.ink2 : tk.ink).attr("font-weight", end.name ? 400 : 600).text(end.value);
+      if (end.value) text.append("tspan").attr("dx", end.name ? 5 : 0).attr("fill", end.name || end.when ? tk.ink2 : tk.ink).attr("font-weight", end.name ? 400 : 600).text(end.value);
+      if (end.when) text.append("tspan").attr("dx", 4).attr("fill", tk.ink3).text(end.when);
     }
   }
 

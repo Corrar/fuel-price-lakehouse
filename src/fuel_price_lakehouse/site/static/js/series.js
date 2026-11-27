@@ -137,17 +137,51 @@ export function latestChange(model, values) {
   };
 }
 
+/** "YYYY-MM" of a survey week: the month of its Wednesday, the month the deflator uses. */
+export function weekMonth(date) {
+  const wednesday = new Date(date.getTime() + 3 * DAY_MS);
+  return `${wednesday.getUTCFullYear()}-${String(wednesday.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+/** IPCA over the 12 months to the reference month, I(ref) / I(ref - 12), read from the deflator. */
+function ipcaTwelveMonths(model) {
+  const reference = model.meta.ipca_reference_month;
+  if (typeof reference !== "string" || !/^\d{4}-\d{2}$/.test(reference)) return null;
+  const [year, month] = reference.split("-");
+  const yearBefore = `${Number(year) - 1}-${month}`;
+  const i = model.dates.findIndex((date, k) => model.deflator[k] != null && weekMonth(date) === yearBefore);
+  return i < 0 ? null : model.deflator[i];
+}
+
+/**
+ * The 12-month change after inflation of a latest figure. A week whose month
+ * has no IPCA yet is deflated only to the latest published month, so a plain
+ * ratio of real prices would leave one month of inflation out. For such a week
+ * the IPCA of the 12 months to the latest published month stands in, and the
+ * change is marked provisional.
+ */
+function yearReal(model, fuel, base) {
+  if (base.yearIndex < 0) return { value: null, provisional: false };
+  if (!model.provisional[base.index]) {
+    const real = nationalMean(model, fuel, true);
+    return { value: pctChange(real[base.index], real[base.yearIndex]), provisional: false };
+  }
+  const inflation = ipcaTwelveMonths(model);
+  return { value: inflation == null ? null : (1 + base.year) / inflation - 1, provisional: true };
+}
+
 /** Latest national figures of one product: price, changes and sample size. */
 export function latestStats(model, fuel) {
   const series = model.national[fuel];
   if (!series) return null;
   const base = latestChange(model, series.mean);
   if (!base) return null;
-  const real = nationalMean(model, fuel, true);
+  const real = yearReal(model, fuel, base);
   return {
     ...base,
     price: base.value,
-    yearReal: base.yearIndex >= 0 ? pctChange(real[base.index], real[base.yearIndex]) : null,
+    yearReal: real.value,
+    yearRealProvisional: real.provisional,
     stations: series.n_stations?.[base.index] ?? null,
     states: series.n_states?.[base.index] ?? null,
     isLatestWeek: base.index === model.latest,
