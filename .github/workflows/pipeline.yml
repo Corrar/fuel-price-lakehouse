@@ -1,0 +1,136 @@
+name: Pipeline
+
+# Collects, validates and publishes the data. Twice a week: Tuesday, after
+# ANP's weekly update, and Friday, which picks up late publications and keeps
+# the data cache from being evicted (seven days without use). See ADR 0002.
+on:
+  schedule:
+    - cron: "17 10 * * 2"
+    - cron: "17 10 * * 5"
+  workflow_dispatch:
+    inputs:
+      full_check:
+        description: "Download every source file again and compare hashes"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pipeline
+  cancel-in-progress: false
+
+env:
+  SINCE: "2020-01"
+  DATA_RELEASE: data-latest
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      contents: write # release assets of the public data
+      actions: write # keep the schedule from being disabled after 60 quiet days
+    outputs:
+      publishable: ${{ steps.pipeline.outputs.publishable }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --locked --no-dev
+
+      - name: Restore the data of the previous run
+        id: cache
+        uses: actions/cache/restore@v4
+        with:
+          path: data
+          key: data-${{ github.run_id }}
+          restore-keys: data-
+
+      - name: Restore the quality history when there is no cache
+        if: steps.cache.outputs.cache-matched-key == ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p data/quality
+          gh release download "$DATA_RELEASE" --pattern history.jsonl --dir data/quality \
+            || echo "No published history yet: this run starts it."
+
+      - name: Decide whether this run audits every source file
+        id: audit
+        run: |
+          # The first scheduled run of each month downloads everything again.
+          if [ "${{ inputs.full_check }}" = "true" ] || \
+             { [ "${{ github.event_name }}" = "schedule" ] && [ "$(date -u +%d)" -le 7 ] && \
+               [ "$(date -u +%u)" = "2" ]; }; then
+            echo "args=--full-check" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run the pipeline
+        id: pipeline
+        run: |
+          set +e
+          uv run fuel-lakehouse run --since "$SINCE" --site build/site \
+            --summary "$GITHUB_STEP_SUMMARY" --code-version "$GITHUB_SHA" \
+            ${{ steps.audit.outputs.args }}
+          status=$?
+          set -e
+          # 0: the site was built. 1: built too, but some source files failed and
+          # are tried again on the next run (the report says which). 2: the
+          # quality gate failed and nothing is published. Anything else: a crash.
+          case "$status" in
+            0|1) echo "publishable=true" >> "$GITHUB_OUTPUT" ;;
+            *) exit "$status" ;;
+          esac
+
+      - name: Save the data for the next run
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: data
+          key: data-${{ github.run_id }}
+
+      - name: Publish the public data as release assets
+        if: steps.pipeline.outputs.publishable == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "$DATA_RELEASE" >/dev/null 2>&1 || \
+            gh release create "$DATA_RELEASE" --title "Public data (latest run)" \
+              --notes "Aggregates only. Rebuilt by the Pipeline workflow; see the README."
+          # Data first, manifest and history last: a reader that sees the new
+          # manifest knows the tables beside it are complete (ADR 0001).
+          gh release upload "$DATA_RELEASE" build/site/downloads/*.parquet --clobber
+          gh release upload "$DATA_RELEASE" data/quality/history.jsonl \
+            data/manifest/collection.json --clobber
+
+      - name: Upload the site
+        if: steps.pipeline.outputs.publishable == 'true'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: build/site
+
+      - name: Keep the schedule alive
+        if: github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X PUT "repos/${{ github.repository }}/actions/workflows/pipeline.yml/enable"
+
+  deploy:
+    needs: run
+    if: needs.run.outputs.publishable == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
