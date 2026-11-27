@@ -52,6 +52,11 @@ def manifest_path(root: Path = DEFAULT_DATA_ROOT) -> Path:
     return root / "manifest" / "collection.json"
 
 
+def last_extract_path(root: Path = DEFAULT_DATA_ROOT) -> Path:
+    """What the latest collection could not get: the landing page, files that failed."""
+    return root / "manifest" / "last_extract.json"
+
+
 def downloads_dir(root: Path = DEFAULT_DATA_ROOT) -> Path:
     """Scratch space for files being downloaded. Safe to delete at any time."""
     return root / "tmp" / "downloads"

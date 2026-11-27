@@ -21,12 +21,18 @@ import pytest
 from fuel_price_lakehouse.collect import landing
 from fuel_price_lakehouse.config import Clock
 from fuel_price_lakehouse.curate.tables import TABLES
-from fuel_price_lakehouse.layout import curated_dir, manifest_path, staging_state_path
+from fuel_price_lakehouse.layout import (
+    curated_dir,
+    last_extract_path,
+    manifest_path,
+    staging_state_path,
+)
 from fuel_price_lakehouse.quality.checks import CHECKS, CheckResult, run_checks
 from fuel_price_lakehouse.reference import REGION_OF_STATE
 
 CHECK_IDS = [
     "collection_complete",
+    "sources_reachable",
     "raw_files_read_strictly",
     "landing_copies_intact",
     "staging_complete",
@@ -241,6 +247,8 @@ class Lake:
         }
     )
     """What ``curated/_build.json`` says of the build."""
+    last_extract: dict | None = field(default_factory=lambda: {"failed": []})
+    """What ``manifest/last_extract.json`` says of the latest collection."""
 
     def __post_init__(self) -> None:
         self.staging = self.staging or {
@@ -249,6 +257,8 @@ class Lake:
 
     def write(self, root: Path) -> Path:
         write_json(manifest_path(root), {"version": 1, "files": self.collection})
+        if self.last_extract is not None:
+            write_json(last_extract_path(root), self.last_extract)
         for collected in self.collection.values():
             if collected.get("landing_path") and collected.get("sha256"):  # bytes of that hash
                 bytes_ = collected["key"].encode()
@@ -330,7 +340,7 @@ def test_curated_tables_without_rows_fail_their_checks_instead_of_raising(tmp_pa
     assert results["prices_fresh"].observed == "no collection date"
     assert results["usd_fresh"].observed == "no rate"
     assert results["ipca_complete"].observed == "no IPCA months"
-    assert [results[check_id].status for check_id in CHECK_IDS[7:]] == [
+    assert [results[check_id].status for check_id in CHECK_IDS[8:]] == [
         "pass",  # fuel_price_key_unique: no rows, no duplicated key
         "warn",
         "warn",
@@ -341,6 +351,29 @@ def test_curated_tables_without_rows_fail_their_checks_instead_of_raising(tmp_pa
         "fail",  # ipca_complete
         "pass",  # public_tables_have_no_station_columns: the files are there
     ]
+
+
+def test_collection_in_which_every_source_answered_reaches_them_all(tmp_path):
+    result = outcome(Lake(), tmp_path, "sources_reachable")
+
+    assert (result.status, result.observed) == ("pass", "0 failures in the latest collection")
+
+
+def test_source_that_did_not_answer_warns_and_says_what_failed(tmp_path):
+    lake = Lake(last_extract={"failed": [{"key": "anp", "detail": "HTTP 503 from gov.br"}]})
+
+    result = outcome(lake, tmp_path, "sources_reachable")
+
+    assert (result.status, result.severity) == ("warn", "warning")
+    assert result.observed == "1 failures in the latest collection"
+    assert result.detail == "anp: HTTP 503 from gov.br"
+
+
+def test_data_root_never_collected_into_cannot_say_whether_the_sources_answered(tmp_path):
+    result = outcome(Lake(last_extract=None), tmp_path, "sources_reachable")
+
+    assert (result.status, result.observed) == ("warn", "not evaluated")
+    assert result.detail == "no record of the latest collection: run the collection"
 
 
 def test_file_that_was_never_collected_fails_the_run(tmp_path):

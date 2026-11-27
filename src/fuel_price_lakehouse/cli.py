@@ -3,8 +3,8 @@
     fuel-lakehouse run --since 2020-01 --site build/site
 
 Exit codes: 0 when the step (or the run) succeeded; 1 when some files failed
-and will be tried again on the next run; 2 when the quality gate failed, in
-which case nothing was published.
+and will be tried again on the next run; 2 when the quality gate failed or the
+site builder refused, in which case nothing was published; 3 when it crashed.
 """
 
 from __future__ import annotations
@@ -28,6 +28,9 @@ DEFAULT_SITE = Path("build/site")
 OK = 0
 SOME_FILES_FAILED = 1
 QUALITY_GATE_FAILED = 2
+CRASHED = 3
+"""Not Python's 1 for an uncaught exception: a scheduler must never mistake a crash
+for a run that only lost a few files."""
 
 
 def _month(text: str) -> date:
@@ -114,6 +117,14 @@ def build_parser() -> argparse.ArgumentParser:
     _add_site(site)
     site.set_defaults(handler=_site)
 
+    release = commands.add_parser(
+        "release", help="assemble the release assets: public tables, manifest, history"
+    )
+    release.add_argument(
+        "--out", type=Path, required=True, metavar="DIR", help="folder to write them into"
+    )
+    release.set_defaults(handler=_release)
+
     docs = commands.add_parser("docs", help="regenerate the documents generated from the code")
     docs.add_argument(
         "--repository", type=Path, default=Path(), help="repository root (default: here)"
@@ -161,6 +172,12 @@ def _add_report_options(command: argparse.ArgumentParser) -> None:
         "--code-version",
         metavar="SHA",
         help="the commit the run was made with, recorded in the report",
+    )
+    command.add_argument(
+        "--history-from",
+        type=Path,
+        metavar="FILE",
+        help="merge a history published by earlier runs before adding this run",
     )
 
 
@@ -248,6 +265,14 @@ def _site(args: argparse.Namespace) -> int:
     return OK
 
 
+def _release(args: argparse.Namespace) -> int:
+    from fuel_price_lakehouse.release import write_release
+
+    written = write_release(args.root, args.out)
+    logger.info("release: %s files in %s", len(written), args.out)
+    return OK
+
+
 def _docs(args: argparse.Namespace) -> int:
     from fuel_price_lakehouse.docgen import write_all
 
@@ -261,7 +286,11 @@ def _write_report(args: argparse.Namespace, started_at: datetime) -> dict[str, A
     from fuel_price_lakehouse.quality.summary import render_summary
 
     report = build_report(
-        args.root, started_at=started_at, since=args.since, code_version=args.code_version
+        args.root,
+        started_at=started_at,
+        since=args.since,
+        code_version=args.code_version,
+        history_from=args.history_from,
     )
     failing = [check["id"] for check in report["checks"] if check["status"] != "pass"]
     logger.info("report: %s%s", report["status"], f" ({', '.join(failing)})" if failing else "")
@@ -293,4 +322,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         stream=sys.stderr,
     )
     logging.getLogger("httpx").setLevel(logging.WARNING)
-    return int(args.handler(args))
+    try:
+        return int(args.handler(args))
+    except Exception:
+        logger.exception("%s: crashed", args.command)
+        return CRASHED

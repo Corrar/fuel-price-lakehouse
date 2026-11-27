@@ -183,6 +183,10 @@ def collect(
         page = fetcher.get(LANDING_PAGE)
         discovery = discover(page.text)
     except (TransientError, SourceError) as error:
+        # Not a manifest record: the page is not a file, and a record that is
+        # never ingested would close the quality gate for good. The failure is
+        # reported through the extract outcomes instead (``last_extract.json``).
+        logger.error("anp: landing page could not be read: %s", error)
         return [Outcome(LANDING_PAGE, "failed", detail=str(error))]
     for url in discovery.unrecognised:
         logger.warning("anp: link not recognised, skipped: %s", url)

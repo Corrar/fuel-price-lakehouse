@@ -10,10 +10,10 @@ import httpx
 import pyarrow.parquet as pq
 import pytest
 
-from fuel_price_lakehouse.collect import landing
+from fuel_price_lakehouse.collect import anp, landing
 from fuel_price_lakehouse.collect.run import rebuild_raw
 from fuel_price_lakehouse.collect.run import run as collect
-from fuel_price_lakehouse.layout import manifest_path
+from fuel_price_lakehouse.layout import last_extract_path, manifest_path
 
 from .conftest import (
     FOUR_WEEKS,
@@ -249,6 +249,19 @@ def test_corrupt_republication_keeps_the_previous_good_version(web, tmp_path, fa
     assert record["sha256"] == good["sha256"]
     assert "no CSV header" in record["last_error"]
     assert pq.read_table(tmp_path / record["raw_path"]).num_rows == 2
+
+
+def test_republication_without_its_header_fails_without_quoting_a_row(web, tmp_path, fast):
+    run(web, tmp_path, fast)
+    rows = anp_csv("6,01", "6,01").split(b"\r\n", 1)[1]  # its first line is a station's row
+    web.files[OCTOBER_DIESEL] = rows.replace(b"CENTRO", b"")  # two empty fields, as is common
+
+    outcomes = run(web, tmp_path, fast)
+
+    assert actions(outcomes)[OCTOBER_DIESEL] == "failed"
+    error = manifest(tmp_path)[OCTOBER_DIESEL]["last_error"]
+    assert "unusable header" in error
+    assert "POSTO" not in error and "11.222.333" not in error  # nothing of the row is repeated
 
 
 def test_file_in_windows_1252_is_read_and_the_encoding_recorded(web, tmp_path, fast):
@@ -590,3 +603,27 @@ def test_sgs_malformed_body_is_a_failure_not_a_raw_file(web, tmp_path, fast):
 
 
 # --- command line --------------------------------------------------------------------------------
+
+
+def test_landing_page_that_does_not_answer_is_logged_and_kept_for_the_report(
+    web, tmp_path, fast, caplog
+):
+    web.failures[anp.LANDING_PAGE] = [503] * 3  # every attempt allowed
+
+    outcomes = run(web, tmp_path, fast)
+
+    assert actions(outcomes)[anp.LANDING_PAGE] == "failed"
+    assert anp.LANDING_PAGE not in manifest(tmp_path)  # the page is not a file
+    assert "anp: landing page could not be read" in caplog.text
+    (failed,) = json.loads(last_extract_path(tmp_path).read_text(encoding="utf-8"))["failed"]
+    assert failed["key"] == anp.LANDING_PAGE and "503" in failed["detail"]
+
+    run(web, tmp_path, fast)
+
+    assert json.loads(last_extract_path(tmp_path).read_text(encoding="utf-8")) == {"failed": []}
+
+
+def test_dry_run_leaves_no_record_of_a_collection(web, tmp_path, fast):
+    run(web, tmp_path, fast, dry_run=True)
+
+    assert not last_extract_path(tmp_path).exists()

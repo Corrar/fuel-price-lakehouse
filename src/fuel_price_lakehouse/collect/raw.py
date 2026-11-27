@@ -214,8 +214,16 @@ def _open_csv_bytes(path: Path) -> Iterator[IO[bytes]]:
 def _checked_header(header: list[str] | None, path: Path) -> list[str]:
     if not header or len(header) < 2 or header[0].lstrip().startswith("<"):
         raise CorruptFileError(f"{path.name}: no CSV header found")
-    if len(set(header)) != len(header) or any(name.startswith("_") for name in header):
-        raise CorruptFileError(f"{path.name}: unusable header {header!r}")
+    repeated = len(header) - len(set(header))
+    reserved = sum(name.startswith("_") for name in header)
+    if repeated or reserved:
+        # The first line may be a data row (a file that lost its header): the
+        # message says what is wrong without quoting it, because it ends up in
+        # the manifest and a data row names a station.
+        raise CorruptFileError(
+            f"{path.name}: unusable header: {len(header)} fields, {repeated} repeated names, "
+            f"{reserved} names starting with '_'"
+        )
     return header
 
 
