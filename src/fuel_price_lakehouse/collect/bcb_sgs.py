@@ -190,6 +190,10 @@ def _collect_window(
     new_etag = response.headers.get("ETag", "")
     if previous is not None and previous.sha256 == sha256:
         previous.details["etag"] = new_etag
+        if previous.landing_path is None and response.status_code == 200:
+            # A record from before the landing zone: keep the bytes now that we have them.
+            backfilled = landing.store_bytes(body, sha256, Source.BCB_SGS, root)
+            previous.landing_path = backfilled.relative_to(root).as_posix()
         return Outcome(window.key, "unchanged", len(body), detail="same hash")
     if response.status_code == 404 and previous is not None and previous.rows:
         raise SourceError(f"{window.url}: had {previous.rows} rows, now reports no data")

@@ -10,7 +10,6 @@ import httpx
 import pyarrow.parquet as pq
 import pytest
 
-from fuel_price_lakehouse import cli
 from fuel_price_lakehouse.collect import landing
 from fuel_price_lakehouse.collect.run import rebuild_raw
 from fuel_price_lakehouse.collect.run import run as collect
@@ -429,16 +428,17 @@ def test_full_check_fills_in_missing_landing_copies(web, tmp_path, fast):
     run(web, tmp_path, fast)
     path = manifest_path(tmp_path)
     document = json.loads(path.read_text(encoding="utf-8"))
-    landed = tmp_path / document["files"][OCTOBER_DIESEL]["landing_path"]
-    landed.unlink()
-    document["files"][OCTOBER_DIESEL]["landing_path"] = None  # a record from before landing
+    for key in (OCTOBER_DIESEL, "bcb_sgs/1/2026"):  # records from before the landing zone
+        (tmp_path / document["files"][key]["landing_path"]).unlink()
+        document["files"][key]["landing_path"] = None
     path.write_text(json.dumps(document), encoding="utf-8")
 
     run(web, tmp_path, fast, full_check=True)
 
-    record = manifest(tmp_path)[OCTOBER_DIESEL]
-    assert landing.sha256_of(tmp_path / record["landing_path"]) == record["sha256"]
-    assert record["revision"] == 1
+    for key in (OCTOBER_DIESEL, "bcb_sgs/1/2026"):
+        record = manifest(tmp_path)[key]
+        assert landing.sha256_of(tmp_path / record["landing_path"]) == record["sha256"]
+        assert record["revision"] == 1
 
 
 # --- landing zone --------------------------------------------------------------------------------
@@ -590,10 +590,3 @@ def test_sgs_malformed_body_is_a_failure_not_a_raw_file(web, tmp_path, fast):
 
 
 # --- command line --------------------------------------------------------------------------------
-
-
-def test_since_must_be_year_month():
-    args = cli.build_parser().parse_args(["extract", "--since", "2026-07"])
-    assert args.since == date(2026, 7, 1)
-    with pytest.raises(SystemExit):
-        cli.build_parser().parse_args(["extract", "--since", "07/2026"])

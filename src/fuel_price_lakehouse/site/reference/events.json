@@ -1,0 +1,191 @@
+[
+  {
+    "date": "2020-03-11",
+    "title_pt": "OMS declara pandemia de covid-19",
+    "title_en": "WHO declares COVID-19 pandemic",
+    "detail_pt": "A Organização Mundial da Saúde declarou a covid-19 uma pandemia; a ANP registrou depois quedas de 8,87% em abril e de 6,10% em maio de 2020 no preço médio de revenda da gasolina comum, nos dois primeiros meses de medidas de isolamento social no Brasil.",
+    "detail_en": "The World Health Organization declared COVID-19 a pandemic; ANP later recorded falls of 8.87% in April and 6.10% in May 2020 in the average retail price of regular gasoline, during the first two months of social-isolation measures in Brazil.",
+    "fuels": [
+      "GASOLINA",
+      "ETANOL",
+      "DIESEL",
+      "DIESEL S10"
+    ],
+    "source_url": "https://agenciabrasil.ebc.com.br/geral/noticia/2020-03/organizacao-mundial-da-saude-declara-pandemia-de-coronavirus",
+    "source_quote": "O diretor-geral da Organização Mundial da Saúde (OMS), Tedros Adhanom, declarou hoje (11) que a organização elevou o estado da contaminação pelo novo coronavírus como pandemia. [...] [ANP, Boletim Trimestral de Preços e Volumes de Combustíveis n. 6, 2T2020, https://www.gov.br/anp/pt-br/centrais-de-conteudo/publicacoes/boletins-anp/btpvc-1/2020/boletim-trimestral-sdc-6-2t20-novo.pdf] Foram registradas reduções de 8,87% e de 6,10%, respectivamente, em abril e maio, e avanço de 3,82% em junho. Esses recuos coincidiram com os dois primeiros meses de medidas de isolamento social no País."
+  },
+  {
+    "date": "2022-03-11",
+    "title_pt": "LC 192 zera PIS/Cofins do diesel; Petrobras eleva preços",
+    "title_en": "LC 192 zeroes diesel PIS/Cofins; Petrobras raises prices",
+    "detail_pt": "A Lei Complementar 192, sancionada e publicada nesse dia, zerou o PIS/Cofins do diesel e do biodiesel até 31 de dezembro de 2022 e previu uma alíquota única nacional de ICMS por combustível, fixa por unidade e cobrada uma única vez; no mesmo dia a Petrobras elevou os preços da gasolina e do diesel nas refinarias.",
+    "detail_en": "Lei Complementar 192, sanctioned and published that day, cut PIS/Cofins on diesel and biodiesel to zero until 31 December 2022 and provided for a single nationwide ICMS rate per fuel, fixed per unit and charged once; on the same day Petrobras raised its refinery prices for gasoline and diesel.",
+    "fuels": [
+      "GASOLINA",
+      "DIESEL",
+      "DIESEL S10"
+    ],
+    "source_url": "https://g1.globo.com/carros/noticia/2024/02/01/da-isencao-a-reoneracao-integral-veja-como-foi-o-vaivem-dos-impostos-sobre-combustiveis-desde-2021.ghtml",
+    "source_quote": "11 de março de 2022 - Redução a zero das alíquotas de PIS/Cofins para óleo diesel A (sem adição de biodiesel) e biodiesel. [...] Na data, também foi sancionado o projeto que determinou alíquota única no ICMS de combustíveis para todos os estados e estabeleceu a tributação monofásica [...] No mesmo dia, a Petrobras aumentou os preços da gasolina e do diesel nas refinarias."
+  },
+  {
+    "date": "2022-06-23",
+    "title_pt": "LC 194: teto do ICMS e tributos federais zerados na gasolina",
+    "title_en": "LC 194: ICMS cap and zero federal taxes on gasoline",
+    "detail_pt": "A Lei Complementar 194 classificou os combustíveis como bens essenciais, vedando alíquotas de ICMS acima da alíquota geral de cada estado, e zerou PIS/Cofins e Cide da gasolina e do etanol, e PIS/Cofins do GNV, até 31 de dezembro de 2022.",
+    "detail_en": "Lei Complementar 194 classified fuels as essential goods, barring ICMS rates above each state's general rate, and cut PIS/Cofins and Cide on gasoline and ethanol, and PIS/Cofins on CNG, to zero until 31 December 2022.",
+    "fuels": [
+      "GASOLINA",
+      "ETANOL",
+      "GNV"
+    ],
+    "source_url": "https://www.planalto.gov.br/ccivil_03/leis/lcp/Lcp194.htm",
+    "source_quote": "é vedada a fixação de alíquotas sobre as operações referidas no caput deste artigo em patamar superior ao das operações em geral [...] incidentes sobre as operações que envolvam gasolina e suas correntes, exceto de aviação, [...] ficam reduzidas a 0 (zero) até 31 de dezembro de 2022. [...] Este texto não substitui o publicado no DOU de 23.6.2022 - Edição extra"
+  },
+  {
+    "date": "2023-03-01",
+    "title_pt": "Volta parcial dos tributos federais sobre gasolina e etanol",
+    "title_en": "Federal taxes partly return on gasoline and ethanol",
+    "detail_pt": "Uma medida provisória (MP 1.163) retomou parte do PIS/Cofins sobre a gasolina (R$ 0,47 por litro) e sobre o etanol (R$ 0,02 por litro), encerrando a alíquota zero em vigor desde junho de 2022.",
+    "detail_en": "A provisional measure (MP 1.163) reinstated part of PIS/Cofins on gasoline (R$0.47 per litre) and on ethanol (R$0.02 per litre), ending the zero rate in force since June 2022.",
+    "fuels": [
+      "GASOLINA",
+      "ETANOL"
+    ],
+    "source_url": "https://g1.globo.com/economia/noticia/2023/02/28/governo-detalha-como-sera-feito-retorno-da-cobranca-de-impostos-federais-sobre-gasolina-e-etanol.ghtml",
+    "source_quote": "detalharam nesta terça-feira (28) como será a volta dos impostos federais que incidem sobre a gasolina e o etanol, a partir desta quarta-feira (1º). [...] R$ 0,47 por litro para a gasolina; R$ 0,02 por litro para o etanol."
+  },
+  {
+    "date": "2023-05-17",
+    "title_pt": "Petrobras reduz preços após encerrar a paridade (PPI)",
+    "title_en": "Petrobras cuts prices after ending import parity (PPI)",
+    "detail_pt": "A Petrobras reduziu seus preços para as distribuidoras em R$ 0,40 por litro na gasolina e R$ 0,44 por litro no diesel, a primeira mudança depois de anunciar, em 16 de maio, o fim da política de paridade de importação (PPI).",
+    "detail_en": "Petrobras cut its prices to distributors by R$0.40 per litre for gasoline and R$0.44 per litre for diesel, the first change after it announced on 16 May the end of its import-parity pricing policy (PPI).",
+    "fuels": [
+      "GASOLINA",
+      "DIESEL",
+      "DIESEL S10"
+    ],
+    "source_url": "https://g1.globo.com/economia/noticia/2023/05/16/petrobras-reduz-preco-do-diesel-e-da-gasolina-para-as-distribuidoras.ghtml",
+    "source_quote": "A medida passa a valer a partir desta quarta-feira (17). [...] Essa é a primeira mudança depois que a Petrobras anunciou o fim da política de paridade de importação (PPI), que guiava os preços dos combustíveis desde 2016."
+  },
+  {
+    "date": "2023-06-01",
+    "title_pt": "Começa o ICMS fixo e único da gasolina (R$ 1,22/l)",
+    "title_en": "Single fixed ICMS rate starts for gasoline (R$1.22/l)",
+    "detail_pt": "A alíquota única e fixa de ICMS prevista na Lei Complementar 192/2022 entrou em vigor para a gasolina, em R$ 1,22 por litro em todos os estados, no lugar das alíquotas percentuais definidas por cada estado; para o diesel (R$ 0,9456 por litro) e o GLP (R$ 1,2571 por quilo) ela valia desde 1º de maio de 2023.",
+    "detail_en": "The single fixed ICMS rate provided for by Lei Complementar 192/2022 took effect for gasoline at R$1.22 per litre in every state, replacing percentage rates set by each state; for diesel (R$0.9456 per litre) and LPG (R$1.2571 per kg) it had applied since 1 May 2023.",
+    "fuels": [
+      "GASOLINA"
+    ],
+    "source_url": "https://agenciabrasil.ebc.com.br/economia/noticia/2023-06/aliquota-fixa-e-unica-do-icms-nos-combustiveis-entra-hoje-em-vigor",
+    "source_quote": "Entrou em vigor, nesta quinta-feira (1º), a alíquota única e fixa do Imposto sobre Circulação de Mercadorias e Serviços (ICMS) sobre a gasolina e o etanol. A cobrança será de R$ 1,22 por litro em todo o território nacional. [...] [Confaz, Convênio ICMS 199/22, https://www.confaz.fazenda.gov.br/legislacao/convenios/2022/CV199_22] Redação original, efeitos até 31.01.24: I – para o diesel e biodiesel, em R$ 0,9456; II – para o GLP/GLGN, inclusive o derivado do gás natural, em R$ 1,2571. [...] produzindo efeitos a partir de 1° de maio de 2023"
+  },
+  {
+    "date": "2023-06-29",
+    "title_pt": "PIS/Cofins integral volta para gasolina e etanol",
+    "title_en": "Full PIS/Cofins back on gasoline and ethanol",
+    "detail_pt": "As alíquotas integrais de PIS/Cofins sobre gasolina e etanol voltaram a ser cobradas a partir desta data, depois que a medida provisória que fixava alíquotas parciais desde março de 2023 (MP 1.163) perdeu a validade em 28 de junho sem ser votada pelo Congresso.",
+    "detail_en": "Full PIS/Cofins rates on gasoline and ethanol were charged again from this date, after the provisional measure that had set partial rates since March 2023 (MP 1.163) expired on 28 June without a vote in Congress.",
+    "fuels": [
+      "GASOLINA",
+      "ETANOL"
+    ],
+    "source_url": "https://g1.globo.com/economia/noticia/2023/06/28/tributos-sobre-gasolina-e-etanol-sobem-a-partir-desta-quinta-feira-dizem-entidades.ghtml",
+    "source_quote": "O prazo original era 30 de junho, mas a medida provisória que estabelece os valores e o novo imposto perde validade nesta quarta-feira (28), sem ter sido aprovada pelo Congresso. Por isso, a retomada da cobrança integral a partir desta quinta-feira (29)."
+  },
+  {
+    "date": "2024-01-01",
+    "title_pt": "PIS/Cofins integral volta para o diesel (R$ 0,35/l)",
+    "title_en": "Full PIS/Cofins back on diesel (R$0.35/l)",
+    "detail_pt": "O PIS/Cofins integral sobre o diesel, de R$ 0,35 por litro, voltou a ser cobrado, dias depois de a Petrobras anunciar um corte de R$ 0,30 por litro no preço do diesel.",
+    "detail_en": "Full PIS/Cofins on diesel, R$0.35 per litre, was charged again, days after Petrobras announced a cut of R$0.30 per litre in its diesel price.",
+    "fuels": [
+      "DIESEL",
+      "DIESEL S10"
+    ],
+    "source_url": "https://agenciabrasil.ebc.com.br/economia/noticia/2024-01/cobranca-integral-de-impostos-sobre-diesel-retorna-partir-de-hoje",
+    "source_quote": "Esta segunda-feira (1º) marca o retorno da cobrança integral do PIS/Cofins sobre o diesel. [...] A partir de hoje, a arrecadação volta a ser integral: R$ 0,35 por litro de diesel. [...] Poucas horas antes, a Petrobras já havia anunciado um corte de R$ 0,30 no preço do litro do diesel que vende às distribuidoras de combustível."
+  },
+  {
+    "date": "2024-02-01",
+    "title_pt": "ICMS sobe para R$ 1,37/l na gasolina e R$ 1,06/l no diesel",
+    "title_en": "ICMS rises to R$1.37/l on gasoline, R$1.06/l on diesel",
+    "detail_pt": "As alíquotas fixas de ICMS subiram 12,5%, para R$ 1,3721 por litro na gasolina e R$ 1,0635 por litro no diesel, com o mesmo percentual de aumento no GLP.",
+    "detail_en": "The fixed ICMS rates rose 12.5%, to R$1.3721 per litre on gasoline and R$1.0635 per litre on diesel, with the same percentage increase on LPG.",
+    "fuels": [
+      "GASOLINA",
+      "DIESEL",
+      "DIESEL S10",
+      "GLP"
+    ],
+    "source_url": "https://g1.globo.com/carros/noticia/2024/02/01/da-isencao-a-reoneracao-integral-veja-como-foi-o-vaivem-dos-impostos-sobre-combustiveis-desde-2021.ghtml",
+    "source_quote": "O Imposto sobre a Circulação de Mercadorias e Serviços (ICMS) terá um aumento de 12,5% sobre a gasolina, o diesel e o gás de cozinha a partir desta quinta-feira (1º). [...] As altas serão de R$ 1,3721 por litro para a gasolina e de R$ 1,0635 para o diesel e biodiesel."
+  },
+  {
+    "date": "2025-02-01",
+    "title_pt": "ICMS sobe de novo; Petrobras reajusta o diesel",
+    "title_en": "ICMS rises again; Petrobras raises diesel price",
+    "detail_pt": "A alíquota fixa de ICMS subiu de R$ 1,37 para R$ 1,47 por litro na gasolina e de R$ 1,06 para R$ 1,12 por litro no diesel, e a Petrobras elevou em R$ 0,22 por litro o preço do diesel nas refinarias.",
+    "detail_en": "The fixed ICMS rate rose from R$1.37 to R$1.47 per litre on gasoline and from R$1.06 to R$1.12 per litre on diesel, and Petrobras raised its refinery diesel price by R$0.22 per litre.",
+    "fuels": [
+      "GASOLINA",
+      "DIESEL",
+      "DIESEL S10"
+    ],
+    "source_url": "https://agenciabrasil.ebc.com.br/economia/noticia/2025-01/preco-de-combustiveis-sobe-partir-deste-sabado",
+    "source_quote": "A partir deste sábado (1º), abastecer o veículo ficará mais caro. [...] No caso do diesel, a Petrobras elevou o preço nas refinarias em R$ 0,22 por litro (+6,2%) [...] a alíquota de ICMS subirá R$ 0,06, de R$ 1,06 para R$ 1,12 por litro. [...] a alíquota de ICMS subiu R$ 0,10, de R$ 1,37 para R$ 1,47 por litro."
+  },
+  {
+    "date": "2025-08-01",
+    "title_pt": "Mistura sobe: etanol 30% (E30) e biodiesel 15% (B15)",
+    "title_en": "Ethanol blend rises to 30% (E30), biodiesel to 15% (B15)",
+    "detail_pt": "A mistura obrigatória de etanol anidro na gasolina passou de 27% para 30% (E30) e a de biodiesel no diesel passou de 14% para 15% (B15), conforme decisão do CNPE de 25 de junho de 2025.",
+    "detail_en": "The mandatory blend of anhydrous ethanol in gasoline rose from 27% to 30% (E30) and the blend of biodiesel in diesel rose from 14% to 15% (B15), as decided by the CNPE on 25 June 2025.",
+    "fuels": [
+      "GASOLINA",
+      "DIESEL",
+      "DIESEL S10"
+    ],
+    "source_url": "https://www.gov.br/anp/pt-br/canais_atendimento/imprensa/noticias-comunicados/revendedores-de-combustiveis-anp-divulga-orientacoes-devido-a-chegada-do-e30-e-b15",
+    "source_quote": "Desde 1º de agosto, a mistura obrigatória de etanol anidro na gasolina passou de 27% para 30% (E30) e a de biodiesel no óleo diesel, de 14% para 15% (B15), conforme a Resolução nº 9 do Conselho Nacional de Política Energética (CNPE), de 25 de junho de 2025."
+  },
+  {
+    "date": "2026-01-01",
+    "title_pt": "ICMS sobe para R$ 1,57/l na gasolina e R$ 1,17/l no diesel",
+    "title_en": "ICMS rises to R$1.57/l on gasoline, R$1.17/l on diesel",
+    "detail_pt": "As alíquotas fixas de ICMS subiram R$ 0,10 por litro na gasolina, para R$ 1,57, R$ 0,05 por litro no diesel, para R$ 1,17, e R$ 1,05 por botijão no GLP.",
+    "detail_en": "The fixed ICMS rates rose by R$0.10 per litre on gasoline, to R$1.57, by R$0.05 per litre on diesel, to R$1.17, and by R$1.05 per cylinder on LPG.",
+    "fuels": [
+      "GASOLINA",
+      "DIESEL",
+      "DIESEL S10",
+      "GLP"
+    ],
+    "source_url": "https://g1.globo.com/economia/noticia/2026/01/01/aumento-de-imposto-sobre-gasolina-diesel-e-gas-de-cozinha-ja-comeca-a-valer-para-2026.ghtml",
+    "source_quote": "O aumento no Imposto Sobre Circulação de Mercadorias e Serviços (ICMS), tributo estadual, sobre gasolina, diesel e gás de cozinha já está valendo a partir desta quinta-feira (1º). [...] Para a gasolina, haverá uma elevação de R$ 0,10 por litro, para R$ 1,57. Para o diesel, o aumento será de R$ 0,05 por litro, para R$ 1,17. No caso do gás de cozinha, o aumento será de R$ 1,05 por botijão."
+  },
+  {
+    "date": "2026-02-28",
+    "title_pt": "EUA e Israel atacam o Irã; petróleo sobe",
+    "title_en": "US and Israel attack Iran; oil prices rise",
+    "detail_pt": "Os Estados Unidos e Israel iniciaram uma ofensiva militar contra o Irã e houve relatos de navios sem poder atravessar o Estreito de Ormuz; no dia útil seguinte o petróleo Brent chegou a subir 13%, superando US$ 80 por barril.",
+    "detail_en": "The United States and Israel began a military offensive against Iran and ships were reported unable to cross the Strait of Hormuz; on the next trading day Brent crude rose as much as 13%, to above US$80 per barrel.",
+    "fuels": [],
+    "source_url": "https://agenciabrasil.ebc.com.br/economia/noticia/2026-03/dolar-sobe-e-petroleo-dispara-com-ataque-militar-ao-ira-entenda",
+    "source_quote": "O preço do petróleo no mercado internacional disparou na manhã desta segunda-feira (2), primeiro dia útil após a ofensiva militar dos Estados Unidos e de Israel contra o Irã [...] No sábado, dia dos primeiros ataques, houve relatos de centenas de embarcações ancoradas, sem poder atravessar o estreito. [...] o barril do Brent chegou a bater 13% de alta nesta segunda, superando US$ 80."
+  },
+  {
+    "date": "2026-09-10",
+    "title_pt": "Decreto reduz PIS/Cofins da gasolina e zera o do etanol",
+    "title_en": "Decree cuts PIS/Cofins on gasoline, zeroes it on ethanol",
+    "detail_pt": "O Decreto 13.116 reduziu o PIS/Cofins da gasolina para R$ 160 por metro cúbico (R$ 0,16 por litro) e zerou o do etanol hidratado de 10 de setembro a 9 de outubro de 2026; decretos posteriores (13.134 e 13.159) zeraram a alíquota da gasolina a partir de 10 de outubro e prorrogaram as reduções até 9 de dezembro de 2026.",
+    "detail_en": "Decreto 13.116 reduced PIS/Cofins on gasoline to R$160 per cubic metre (R$0.16 per litre) and to zero on hydrous ethanol from 10 September to 9 October 2026; later decrees (13.134 and 13.159) cut the gasoline rate to zero from 10 October and extended the reductions to 9 December 2026.",
+    "fuels": [
+      "GASOLINA",
+      "ETANOL"
+    ],
+    "source_url": "https://www.planalto.gov.br/ccivil_03/_ato2023-2026/2026/decreto/d13116.htm",
+    "source_quote": "A partir de 10 de setembro de 2026 até 9 de outubro de 2026 [...] ficam reduzidas, respectivamente, para R$ 28,49 [...] e R$ 131,51 [...] por metro cúbico de gasolina e suas correntes. [...] ficam reduzidas para R$ 0,00 (zero real) por metro cúbico de etanol hidratado combustível. [...] Este texto não substitui o publicado no DOU de 10.9.2026"
+  }
+]

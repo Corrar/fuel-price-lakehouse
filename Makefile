@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help install lint typecheck format test check extract stage docs clean
+.PHONY: help install lint typecheck format test check extract stage curate report site pipeline docs clean
 
 help: ## Show available targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "} {printf "  %-11s %s\n", $$1, $$2}'
@@ -29,7 +29,19 @@ extract: ## Collect what is new into the raw layer (SINCE=YYYY-MM sets the first
 stage: ## Validate raw files into the staged layer; rejected rows go to quarantine
 	uv run fuel-lakehouse stage $(ARGS)
 
-docs: ## Regenerate the documents generated from the code (docs/quality-rules.md)
+curate: ## Rebuild the curated tables from the staged layer
+	uv run fuel-lakehouse curate
+
+report: ## Run the dataset checks, write the quality report, apply the quality gate
+	uv run fuel-lakehouse report $(if $(SINCE),--since $(SINCE))
+
+site: ## Build the dashboard into build/site from a passing run
+	uv run fuel-lakehouse site
+
+pipeline: ## The whole pipeline: extract, stage, curate, report and, if it passes, site
+	uv run fuel-lakehouse run $(if $(SINCE),--since $(SINCE)) $(ARGS)
+
+docs: ## Regenerate the documents generated from the code (rules, data dictionary)
 	uv run fuel-lakehouse docs
 
 clean: ## Remove caches and build output (never touches data/)
