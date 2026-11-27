@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+import ssl
 import time
 from collections.abc import Callable, Collection
 from dataclasses import dataclass
@@ -46,9 +47,33 @@ class Download:
     sha256: str
 
 
+CLASSIC_KEY_EXCHANGE = "prime256v1"
+"""The one key exchange group offered: P-256, which both sources accept."""
+
+
+def tls_context() -> ssl.SSLContext:
+    """httpx's TLS settings, offering a single classic key exchange group.
+
+    OpenSSL 3.5 adds a post-quantum key share (X25519MLKEM768) to every TLS 1.3
+    handshake, which makes the first message too large for something in front
+    of www.gov.br. Measured from GitHub's runners in November 2026, whose
+    Python ships OpenSSL 3.5: with the default groups, 10 of 10 connections to
+    ANP were reset and 5 of 5 to Banco Central succeeded; with P-256 only, all
+    15 succeeded; with X25519 only, ANP answered but Banco Central refused the
+    handshake. Certificate checks and TLS 1.3 stay as they are.
+    """
+    context = httpx.create_ssl_context()
+    context.set_ecdh_curve(CLASSIC_KEY_EXCHANGE)
+    return context
+
+
 def default_client() -> httpx.Client:
     # Connect fast or fail; reading is slow by nature (about 0.75 MB/s from ANP).
-    return httpx.Client(timeout=httpx.Timeout(60.0, connect=20.0), follow_redirects=True)
+    return httpx.Client(
+        verify=tls_context(),
+        timeout=httpx.Timeout(60.0, connect=20.0),
+        follow_redirects=True,
+    )
 
 
 class Fetcher:

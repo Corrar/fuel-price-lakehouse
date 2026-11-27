@@ -64,6 +64,7 @@ Publication frequency, as stated by the source:
 | Redirects, user agent | No redirects. No special `User-Agent` or `Referer` needed. |
 | Rate limiting | No 429 or throttling in 57 sequential requests about one second apart. |
 | Speed | About 0.72 to 0.79 MB/s on 7–8 MB files from the test machine. |
+| TLS key exchange | A TLS 1.3 handshake carrying OpenSSL 3.5's default post-quantum key share (X25519MLKEM768) is reset after about 10 s: 10 of 10 attempts from GitHub's runners on 2026-11-27, whose Python ships OpenSSL 3.5. Offering only P-256 works for ANP and for Banco Central (15 of 15); X25519 alone works for ANP, but Banco Central refuses it. The HTTP client therefore offers P-256 only (`collect/http.py`). `curl` and OpenSSL 3.0 were not affected. |
 
 ### 1.3 Volume
 

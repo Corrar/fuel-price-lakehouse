@@ -44,7 +44,7 @@ This project turns that into weekly price series that can be trusted:
 | Source files collected (ANP and Banco Central) | 55 |
 | Rows quarantined, with the rule they broke | 9,130 |
 | Validation rules (ANP + Banco Central) / dataset checks | 22 + 5 / 17 |
-| Automated tests (none touch the network) | 583 |
+| Automated tests (none touch the network) | 586 |
 | A full run when nothing new was published (collection included) | about 1.5 minutes |
 
 ## How it works
