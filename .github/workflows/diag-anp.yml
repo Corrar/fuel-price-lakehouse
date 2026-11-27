@@ -1,0 +1,22 @@
+name: diag-anp
+# Temporary: how www.gov.br answers a GitHub-hosted runner. Deleted after use.
+on:
+  push:
+    branches: [diag-anp]
+permissions: {}
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Probe
+        run: |
+          page="https://www.gov.br/anp/pt-br/centrais-de-conteudo/dados-abertos/serie-historica-de-precos-de-combustiveis"
+          probe() { curl -sS -o /dev/null --max-time 30 -w '%{http_code} ip=%{remote_ip} tcp=%{time_connect}s tls=%{time_appconnect}s\n' "$@" || true; }
+          echo "== ANP page, curl default UA";  probe "$page"
+          echo "== ANP page, httpx UA";          probe -A "python-httpx/0.28.1" "$page"
+          echo "== ANP page, browser-like UA";   probe -A "Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0" "$page"
+          echo "== gov.br home";                 probe https://www.gov.br/
+          echo "== Banco Central API";           probe "https://api.bcb.gov.br/dados/serie/bcdata.sgs.1/dados/ultimos/1?formato=json"
+          echo "== DNS";                         getent ahosts www.gov.br | head -3
+          echo "== verbose";                     curl -v -o /dev/null --max-time 30 "$page" 2>&1 | grep -E '^\* |^< HTTP' | head -25 || true
