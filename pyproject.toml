@@ -21,6 +21,7 @@ fuel-lakehouse = "fuel_price_lakehouse.cli:main"
 [dependency-groups]
 dev = [
     "mypy>=1.13",
+    "openpyxl>=3.1.5",
     "pandas-stubs>=3.1.0.261029",
     "pytest>=8.3",
     "pytest-cov>=6",
@@ -48,7 +49,7 @@ select = ["E", "F", "W", "I", "B", "UP", "SIM", "C4", "PTH", "RUF"]
 
 [tool.mypy]
 python_version = "3.12"
-files = ["src"]
+files = ["src", "tools"]
 disallow_untyped_defs = true
 disallow_incomplete_defs = true
 check_untyped_defs = true
@@ -57,7 +58,7 @@ warn_redundant_casts = true
 no_implicit_optional = true
 
 [[tool.mypy.overrides]]
-module = ["pyarrow.*", "duckdb.*", "pandera.*"]
+module = ["pyarrow.*", "duckdb.*", "pandera.*", "openpyxl.*"]
 ignore_missing_imports = true
 
 [tool.coverage.run]
