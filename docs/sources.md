@@ -221,12 +221,15 @@ Conclusion:
   where a licence would normally be declared (the dados.gov.br record) is still
   unread.
 
-What the project does meanwhile: **no ANP data is published by this
-repository.** The pipeline collects and processes locally; nothing derived from
-ANP files is uploaded as a release asset until the owner decides. The source is
-always credited as "ANP — Série Histórica de Preços de Combustíveis". Source
-and contact given in the metadata PDF: "ANP/SDC (Superintendência de Defesa da
-Concorrência)", `sdc@anp.gov.br`.
+What the project publishes ([ADR 0002](decisions/0002-what-is-published.md)):
+**weekly aggregates only** (Brazil, regions, states, branded and white-flag
+stations), leaving out every cell built from fewer than three distinct
+stations. They are served by the GitHub Pages dashboard (JSON, CSV and Parquet)
+and as assets of the `data-latest` release. Nothing station-level (the landing
+zone, the raw, staged and quarantine layers, the curated fact and station
+tables) is published. The source is always credited as "ANP — Série Histórica
+de Preços de Combustíveis". Source and contact given in the metadata PDF:
+"ANP/SDC (Superintendência de Defesa da Concorrência)", `sdc@anp.gov.br`.
 
 ### 1.7 To confirm
 
@@ -251,9 +254,9 @@ the collected data. These are the facts the staged and curated layers rely on.
 | Topic | What was established | Source |
 | --- | --- | --- |
 | **Survey week** | Sunday to Saturday. All 1,163 weeks from 2004 to 2026 in ANP's weekly spreadsheets (`DATA INICIAL` / `DATA FINAL`) start on a Sunday and end on a Saturday. Bucketing `Data da Coleta` that way reproduces ANP's station counts for the week of 15–21/11/2026 for all seven products. ANP never states the convention in words, and two week labels on its pages are off by a day, so the week is always computed from the collection date. | [weekly series since 2013](https://www.gov.br/anp/pt-br/assuntos/precos-e-defesa-da-concorrencia/precos/precos-revenda-e-de-distribuicao-combustiveis/shlp/semanal/semanal-brasil-desde-2013.xlsx) |
-| **Who is surveyed** | Not a fixed panel: stations are drawn at random every week from ANP's registry, with a quota per locality. The full design is 459 localities and 10,920 visits a week; budget cuts reduced it between July 2024 and November 2025. | [survey information page](https://www.gov.br/anp/pt-br/assuntos/precos-e-defesa-da-concorrencia/precos/precos-revenda-e-de-distribuicao-combustiveis/informacoes-levantamento-de-precos-de-combustiveis), [2025 impact report](https://www.gov.br/anp/pt-br/assuntos/consultas-e-audiencias-publicas/consulta-previa/2025/cp-03-2025/rpair.pdf) |
+| **Who is surveyed** | Not a fixed panel: every week ANP selects stations from its registry to form the sample, with a quota per locality. In the data the sample changes slowly: of the stations priced for regular gasoline in one week of 2026, about 80 % (76 to 86 %) are priced again the next week, so a small weekly move includes the effect of the stations that came and went. The full design is 459 localities and 10,920 visits a week; budget cuts reduced it between July 2024 and November 2025. | [survey information page](https://www.gov.br/anp/pt-br/assuntos/precos-e-defesa-da-concorrencia/precos/precos-revenda-e-de-distribuicao-combustiveis/informacoes-levantamento-de-precos-de-combustiveis), [2025 impact report](https://www.gov.br/anp/pt-br/assuntos/consultas-e-audiencias-publicas/consulta-previa/2025/cp-03-2025/rpair.pdf) |
 | **Gaps** | "Não houve pesquisa de preços entre 23/8/2020 e 17/10/2020." The week of 18–24/09/2022 has no station-level rows (change of contractor). The weeks right after each gap have far fewer stations than usual. | [survey information page](https://www.gov.br/anp/pt-br/assuntos/precos-e-defesa-da-concorrencia/precos/precos-revenda-e-de-distribuicao-combustiveis/informacoes-levantamento-de-precos-de-combustiveis); the collected data |
-| **Averages** | A municipality's average is a simple mean of its stations (reproduced for 2,493 of 2,494 municipality-products of one week). ANP's state and national averages are weighted by sales volume, which is not in the open data. **This project publishes simple means over surveyed stations, so its state and national figures differ slightly from ANP's bulletins.** | the collected data, compared with ANP's weekly summary |
+| **Averages** | A municipality's average is a simple mean of its stations: the curated table reproduces 2,505 of the 2,506 municipality-product averages of ANP's summary for 15–21/11/2026 ([validation](validation.md)). ANP's state and national averages are weighted by sales volume, which is not in the open data. **This project publishes simple means over surveyed stations, so its state and national figures differ slightly from ANP's bulletins.** | the collected data, compared with ANP's weekly summary |
 | **`Valor de Compra`** | The distribution price paid by the station. "Série disponível até agosto de 2020"; the last value in the data is dated 17/08/2020. | [metadata PDF](https://www.gov.br/anp/pt-br/centrais-de-conteudo/dados-abertos/arquivos/shpc/metadados-serie-historica-precos-combustiveis-1.pdf) |
 | **`Bandeira` = `BRANCA`** | A station that "opta por não exibir marca comercial de nenhuma distribuidora" (white-flag, unbranded). | metadata PDF |
 | **Products** | `GASOLINA ADITIVADA` appears from 19/10/2020. Prices are cash prices. Prices with three decimal places are the majority in 2020 and 2021, disappear in the first half of 2022, come back in 2,920 rows between July and 13 September 2022, and do not occur after that. | survey information page; the collected data |
@@ -440,7 +443,7 @@ Decisions the measurements above force on the later stages.
 | BOM, decimal comma, padded CNPJ, stray whitespace | Normalise in the staged layer; keep the raw file untouched. |
 | Purchase price empty since 2020 | Nullable column, never a validation failure. |
 | Station names drift for the same CNPJ | CNPJ is the station key; names are attributes. |
-| SGS daily series limited to 10 years per request | Fetch in windows of at most 10 years; monthly series in one request. |
+| SGS daily series limited to 10 years per request | Fetch every series in calendar-year windows, well under the limit; each year is its own manifest record. |
 | SGS returns 404 for an empty window | Treat 404 "Value(s) not found" as "no data", not as an error. |
 | SGS values are strings | Parse the text explicitly, with the dot as decimal mark and negative values allowed (IPCA has negative months); never rely on JSON typing. |
-| SGS daily series skip non-business days | Join fuel prices to the latest available rate on or before the date. |
+| SGS daily series skip non-business days | Average the daily rates within each survey week and join that mean by week; a week without a rate gets no value. |

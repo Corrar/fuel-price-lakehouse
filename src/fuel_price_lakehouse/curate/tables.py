@@ -33,8 +33,9 @@ from fuel_price_lakehouse.reference import (
 )
 
 MIN_STATIONS_PUBLISHED = 3
-"""A public aggregate row needs at least this many distinct stations, so that a
-published number never stands for one or two identifiable businesses. At 3 the
+"""A public aggregate row needs at least this many distinct stations, so that no
+published number is the price of one or two stations. There is no complementary
+suppression, so this is not a disclosure-control guarantee (ADR 0002). At 3 the
 rule removes 0.08 % of the gasoline state-week cells of 2020-2026 and 15.5 % of
 the natural gas (GNV) ones."""
 

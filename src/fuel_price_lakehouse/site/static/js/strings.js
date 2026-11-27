@@ -680,8 +680,8 @@ export const STRINGS = {
   "ab.stack": ["Ferramentas", "Stack"],
   "ab.notes.title": ["Sobre os dados", "About the data"],
   "ab.notes.aggregates": [
-    "Só agregados são publicados: médias, medianas e percentis por semana, UF, região e tipo de bandeira. Nada no nível do posto (CNPJ, nome, endereço) sai do pipeline, e agregados com menos de {min} postos são suprimidos.",
-    "Only aggregates are published: means, medians and percentiles by week, state, region and brand type. Nothing at station level (tax id, name, address) leaves the pipeline, and aggregates with fewer than {min} stations are suppressed.",
+    "Só agregados são publicados: médias, medianas e percentis por semana, UF, região e tipo de bandeira. Nada no nível do posto (CNPJ, nome, endereço) é publicado por este projeto, e agregados com menos de {min} postos ficam de fora.",
+    "Only aggregates are published: means, medians and percentiles by week, state, region and brand type. Nothing at station level (tax id, name, address) is published by this project, and aggregates with fewer than {min} stations are left out.",
   ],
   "ab.notes.sources": [
     "Fontes: ANP — Série Histórica de Preços de Combustíveis (pesquisa semanal de preços) e Banco Central do Brasil — SGS (séries 1, dólar, e 433, IPCA). Os dados pertencem a quem os publica.",

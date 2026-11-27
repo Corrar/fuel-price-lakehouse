@@ -42,7 +42,11 @@ flowchart LR
 ```
 
 `fuel-lakehouse run` executes the five steps in order. Each step is also a
-subcommand of its own (`extract`, `stage`, `curate`, `report`, `site`).
+subcommand of its own (`extract`, `stage`, `curate`, `report`, `site`), and
+`release` assembles the release assets. Exit codes: 0 when everything worked;
+1 when the site was built but some source files failed (they are tried again
+on the next run); 2 when the quality gate failed or the site builder refused,
+so nothing was published; 3 when a step crashed.
 
 ## Layers on disk
 
@@ -52,6 +56,7 @@ defined once, in `src/fuel_price_lakehouse/layout.py`.
 | Layer | Written by | Contents | Kept between runs |
 | --- | --- | --- | --- |
 | `manifest/collection.json` | collect | One record per source file: URL, collection time, size, SHA-256, rows, where its copies are, and the versions it replaced | Yes: it is what makes collection incremental |
+| `manifest/last_extract.json` | collect | What the latest collection could not get, including a landing page that did not answer | Yes |
 | `landing/` | collect | Every downloaded file, byte for byte, named by its SHA-256 (ZIP as is, the rest zstd-compressed) | Yes |
 | `raw/` | collect | A Parquet copy of each source file: every field as the text that came, plus the URL, hash and time it came from | Yes; can be rebuilt from `landing/` without the network |
 | `manifest/staging.json` | stage | One entry per raw file: the hashes it was staged from, row counts per outcome and per rule | Yes |
@@ -86,12 +91,17 @@ files becomes one row, chosen by a fixed precedence (semester over monthly
 over four-week, then the most recent). Prices are bucketed into ANP survey
 weeks (Sunday to Saturday), aggregated by country, region and state, and
 deflated by IPCA. A public aggregate built from fewer than three stations is
-not written. Each table has a contract checked after the build.
+not written (a guard against showing one station's price, not a
+disclosure-control guarantee: see ADR 0002). Each table has a contract checked
+after the build. A rebuild from the same staged files gives byte-identical
+tables; only `_build.json` records a new build time.
 
-**Report** (`quality/`). Dataset-level checks (completeness, reconciliation of
-row counts, freshness, coverage, unexpected gaps, key uniqueness, sudden price
-jumps, no station-level column in public tables) roll up into `pass`, `warn`
-or `fail`. A failed error check is a circuit breaker: nothing is published.
+**Report** (`quality/`). Seventeen dataset-level checks (completeness, sources
+that did not answer, reconciliation of row counts, freshness, coverage,
+unexpected gaps, key uniqueness, sudden price jumps, no station-level column
+in public tables) roll up into `pass`, `warn` or `fail`. A failed error check
+is a circuit breaker: nothing is published. A failed warning check is reported
+and the run is still published.
 
 **Publish** (`site/`). The dashboard is a static folder: an HTML page, ES
 modules, vendored chart libraries, and JSON files with the public aggregates
@@ -101,10 +111,31 @@ Parquet and CSV.
 ## Running it on a schedule
 
 `.github/workflows/pipeline.yml` runs the pipeline twice a week on GitHub
-Actions. The data directory is restored from the Actions cache, which is only
-an accelerator: without it the run rebuilds everything from the public sources
-(about 600 MB of downloads for the default history). The quality history, the
-one thing that cannot be recomputed, is published as a release asset and
-restored from there. The first scheduled run of each month re-downloads every
-file and compares hashes, which catches republications the cheap size check
-cannot see. See [ADR 0002](decisions/0002-what-is-published.md).
+Actions, in four jobs that each get only the permissions they need:
+
+| Job | Permissions | What it does |
+| --- | --- | --- |
+| `build` | read the repository | Restores `data/` from the Actions cache, merges the published quality history, runs the pipeline, saves the cache, and uploads the site and the release assets as artifacts when the gate passes |
+| `publish` | write releases | Replaces the assets of the `data-latest` release: tables first, manifest and history last |
+| `deploy` | deploy Pages | Publishes the site to GitHub Pages |
+| `keepalive` | manage workflows | On scheduled runs, keeps GitHub from disabling the schedule after 60 days without activity |
+
+The cache is only an accelerator: without it the run rebuilds everything from
+the public sources (about 600 MB of downloads for the default history). The
+quality history, the one thing that cannot be recomputed, is published as a
+release asset and merged back on every run. The first Tuesday run of each
+month re-downloads every file and compares hashes, which catches
+republications the cheap size check cannot see. Every action is pinned to a
+commit. See [ADR 0002](decisions/0002-what-is-published.md).
+
+### Deploying your own copy
+
+1. In the repository (or fork) settings, set **Pages → Source** to **GitHub
+   Actions**. This is done once; the workflow token cannot do it, and the
+   `deploy` job stops with a clear message until it is set. A fork also has
+   to enable Actions, since forks start with scheduled workflows off.
+2. Run **Actions → Pipeline → Run workflow** on the default branch (the Pages
+   environment only accepts the default branch), or wait for the next
+   scheduled run. The first run collects the whole history and takes longer.
+
+No secret is needed: everything runs with the token GitHub gives each run.
