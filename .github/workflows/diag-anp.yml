@@ -29,15 +29,19 @@ jobs:
                   print(f"{label}: OK {result} in {time.monotonic() - start:.1f}s")
               except Exception as error:
                   print(f"{label}: {type(error).__name__}: {error} after {time.monotonic() - start:.1f}s")
-          attempt("httpx default_client", lambda: default_client().get(page).status_code)
-          attempt("httpx plain", lambda: httpx.get(page, timeout=30).status_code)
-          attempt("urllib", lambda: urllib.request.urlopen(page, timeout=30).status)
-          v4 = httpx.HTTPTransport(local_address="0.0.0.0")
-          attempt("httpx IPv4 only", lambda: httpx.Client(transport=v4, timeout=30).get(page).status_code)
-          ctx = ssl.create_default_context(); ctx.maximum_version = ssl.TLSVersion.TLSv1_2
-          attempt("httpx TLS 1.2", lambda: httpx.get(page, timeout=30, verify=ctx).status_code)
-          ctx2 = ssl.create_default_context(); ctx2.set_ciphers("DEFAULT")
-          attempt("httpx DEFAULT ciphers", lambda: httpx.get(page, timeout=30, verify=ctx2).status_code)
-          attempt("httpx BCB", lambda: httpx.get("https://api.bcb.gov.br/dados/serie/bcdata.sgs.1/dados/ultimos/1?formato=json", timeout=30).status_code)
-          attempt("httpx default_client again", lambda: default_client().get(page).status_code)
+          def classic():
+              context = httpx.create_ssl_context()
+              context.set_ecdh_curve("X25519")
+              return context
+          client = httpx.Client(verify=classic(), timeout=httpx.Timeout(60.0, connect=20.0), follow_redirects=True)
+          attempt("default (control)", lambda: default_client().get(page).status_code)
+          attempt("X25519 page", lambda: client.get(page).status_code)
+          attempt("X25519 page, length", lambda: len(client.get(page).text))
+          probe = "https://www.gov.br/anp/pt-br/centrais-de-conteudo/dados-abertos/arquivos/shpc/dsas/glp/glp-2026-01.csv"
+          attempt("X25519 file range", lambda: client.get(probe, headers={"Range": "bytes=0-0"}).headers.get("content-range"))
+          attempt("X25519 BCB", lambda: client.get("https://api.bcb.gov.br/dados/serie/bcdata.sgs.1/dados/ultimos/1?formato=json").status_code)
+          ctx = classic()
+          import socket
+          with socket.create_connection(("www.gov.br", 443), timeout=20) as raw, ctx.wrap_socket(raw, server_hostname="www.gov.br") as tls:
+              print("negotiated:", tls.version(), tls.cipher()[0])
           PY
