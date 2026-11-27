@@ -29,19 +29,24 @@ jobs:
                   print(f"{label}: OK {result} in {time.monotonic() - start:.1f}s")
               except Exception as error:
                   print(f"{label}: {type(error).__name__}: {error} after {time.monotonic() - start:.1f}s")
-          def classic():
+          def only(group):
               context = httpx.create_ssl_context()
-              context.set_ecdh_curve("X25519")
+              context.set_ecdh_curve(group)
               return context
-          client = httpx.Client(verify=classic(), timeout=httpx.Timeout(60.0, connect=20.0), follow_redirects=True)
-          attempt("default (control)", lambda: default_client().get(page).status_code)
-          attempt("X25519 page", lambda: client.get(page).status_code)
-          attempt("X25519 page, length", lambda: len(client.get(page).text))
+          bcb = "https://api.bcb.gov.br/dados/serie/bcdata.sgs.1/dados/ultimos/1?formato=json"
           probe = "https://www.gov.br/anp/pt-br/centrais-de-conteudo/dados-abertos/arquivos/shpc/dsas/glp/glp-2026-01.csv"
-          attempt("X25519 file range", lambda: client.get(probe, headers={"Range": "bytes=0-0"}).headers.get("content-range"))
-          attempt("X25519 BCB", lambda: client.get("https://api.bcb.gov.br/dados/serie/bcdata.sgs.1/dados/ultimos/1?formato=json").status_code)
-          ctx = classic()
-          import socket
-          with socket.create_connection(("www.gov.br", 443), timeout=20) as raw, ctx.wrap_socket(raw, server_hostname="www.gov.br") as tls:
-              print("negotiated:", tls.version(), tls.cipher()[0])
+          for label, verify in (("default", True), ("prime256v1", "P256"), ("X25519", "X")):
+              for round_ in range(5):
+                  if verify == "P256":
+                      ctx = only("prime256v1")
+                  elif verify == "X":
+                      ctx = only("X25519")
+                  else:
+                      ctx = httpx.create_ssl_context()
+                  client = httpx.Client(verify=ctx, timeout=httpx.Timeout(30.0, connect=15.0), follow_redirects=True)
+                  attempt(f"{label} #{round_} ANP page", lambda: client.get(page).status_code)
+                  attempt(f"{label} #{round_} ANP range", lambda: client.get(probe, headers={"Range": "bytes=0-0"}).status_code)
+                  attempt(f"{label} #{round_} BCB", lambda: client.get(bcb).status_code)
+                  client.close()
+                  time.sleep(1)
           PY
