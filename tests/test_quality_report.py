@@ -240,7 +240,7 @@ def test_rule_counts_add_up_error_and_warning_rules_alike(tmp_path):
     rules = {(rule["source"], rule["id"]): rule for rule in report_of(lake, tmp_path)["rules"]}
 
     blank = rules["anp", "row_not_blank"]
-    assert (blank["rows"], blank["share"]) == (24, 0.013333)  # of the 1,800 ANP rows
+    assert (blank["rows"], blank["share"]) == (24, 0.01333)  # of the 1,800 ANP rows
     postal_code = rules["anp", "postal_code_is_valid"]
     assert (postal_code["severity"], postal_code["rows"]) == ("warning", 9)
     number = rules["bcb_sgs", "value_is_a_number"]
@@ -423,6 +423,33 @@ def test_running_the_same_run_again_replaces_its_line(tmp_path):
         ("20261123T092507Z", "pass"),
         ("20261126T092507Z", "fail"),
     ]
+
+
+def test_history_published_by_earlier_runs_is_merged_before_this_run(tmp_path):
+    published = tmp_path / "published.jsonl"
+    older = {"run_id": "20261101T101700Z", "finished_at": "2026-11-01T10:30:00Z"}
+    stale = {"run_id": "20261123T092507Z", "finished_at": "2026-11-23T09:30:00Z", "status": "x"}
+    published.write_text(
+        "".join(json.dumps(line) + "\n" for line in (stale, older)) + "not a run\n",
+        encoding="utf-8",
+    )
+    lake = Lake()
+    report_of(lake, tmp_path / "data", STARTED_AT - timedelta(days=3))  # the cache has this one
+
+    report_of(lake, tmp_path / "data", history_from=published)
+
+    lines = history(tmp_path / "data")
+    assert [line["run_id"] for line in lines] == [
+        "20261101T101700Z",
+        "20261123T092507Z",
+        "20261126T092507Z",
+    ]
+    assert lines[1]["status"] == "pass"  # the line written here wins over the published one
+
+
+def test_history_to_merge_that_is_missing_stops_the_report(tmp_path):
+    with pytest.raises(FileNotFoundError, match="no history to merge"):
+        report_of(Lake(), tmp_path / "data", history_from=tmp_path / "absent.jsonl")
 
 
 def test_history_file_keeps_the_latest_520_runs_and_the_report_the_latest_60(tmp_path):

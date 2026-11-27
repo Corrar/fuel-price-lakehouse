@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Preço dos combustíveis no Brasil, semana a semana</title>
+    <meta
+      name="description"
+      content="Quanto custa um litro de combustível no Brasil nesta semana, como isso mudou nos últimos anos e o quanto dá para confiar em cada número. Dados da ANP e do Banco Central."
+    />
+    <meta name="color-scheme" content="light dark" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='4' fill='%231a1713'/%3E%3Crect x='6' y='17' width='20' height='8' fill='%23ffdd6b'/%3E%3Cpath d='M7 12h18' stroke='%23f8f5ee' stroke-width='3'/%3E%3C/svg%3E"
+    />
+    <link rel="preload" href="vendor/fonts/ibm-plex-sans-latin-wdth-normal.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="vendor/fonts/newsreader-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="stylesheet" href="styles.css" />
+    <script>
+      // Stamp the stored theme before the first paint so the page does not flash.
+      try {
+        var stored = localStorage.getItem("fpl.theme");
+        if (stored === "light" || stored === "dark") document.documentElement.dataset.theme = stored;
+      } catch (error) {}
+    </script>
+    <script src="vendor/d3.min.js" defer></script>
+    <script src="vendor/plot.umd.min.js" defer></script>
+    <script type="module" src="js/main.js"></script>
+  </head>
+  <body>
+    <a id="skip" class="skip" href="#main">Pular para o conteúdo</a>
+    <!-- The masthead and the section nav are redrawn by js/chrome.js (language,
+         links that carry the current choices, quality status). This static copy
+         only gives the first paint its final size, so nothing moves when the
+         script runs. -->
+    <header id="masthead" class="masthead">
+      <div class="wrap masthead-row">
+        <a class="brand" href="#/overview">
+          <span class="brand-name">Preço dos combustíveis no Brasil</span>
+          <span class="brand-tag">fuel-price-lakehouse</span>
+        </a>
+      </div>
+    </header>
+    <nav id="sectionnav" class="sectionnav" aria-label="Seções">
+      <div class="wrap nav-row">
+        <ul class="nav-list" role="list">
+          <li><a href="#/overview">Esta semana</a></li>
+          <li><a href="#/findings">Em três gráficos</a></li>
+          <li><a href="#/explorer">Histórico</a></li>
+          <li><a href="#/states">Estados</a></li>
+          <li><a href="#/parity">Etanol ou gasolina</a></li>
+          <li><a href="#/flags">Bandeiras</a></li>
+          <li><a href="#/quality">Qualidade dos dados</a></li>
+          <li><a href="#/about">Como funciona</a></li>
+        </ul>
+        <div class="nav-tools"></div>
+      </div>
+    </nav>
+
+    <main id="main" data-state="loading" tabindex="-1">
+      <div id="notice" class="notice" role="status" hidden></div>
+      <div id="boot" class="boot" role="status" aria-live="polite">
+        <p class="boot-msg">Carregando os dados…</p>
+      </div>
+      <section id="overview" class="sec sec-overview"></section>
+      <section id="findings" class="sec"></section>
+      <section id="explorer" class="sec"></section>
+      <section id="states" class="sec"></section>
+      <section id="parity" class="sec"></section>
+      <section id="flags" class="sec"></section>
+      <section id="quality" class="sec"></section>
+      <section id="about" class="sec"></section>
+    </main>
+
+    <footer id="footer" class="footer"></footer>
+    <div id="tooltip" class="tooltip" role="status" aria-live="polite" hidden></div>
+    <noscript>
+      <p class="noscript">Este painel precisa de JavaScript para carregar e desenhar os dados. / This dashboard needs JavaScript to load and draw the data.</p>
+    </noscript>
+  </body>
+</html>

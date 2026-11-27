@@ -83,13 +83,16 @@ def build_report(
     started_at: datetime,
     since: date,
     code_version: str | None = None,
+    history_from: Path | None = None,
     now: Clock = utc_now,
 ) -> dict[str, Any]:
     """Assemble the report of the run that started at ``started_at``, and save it.
 
     ``since`` is the first month of history the run covers. The report is
     written to ``quality/report.json`` and the run gets its line in
-    ``quality/history.jsonl``.
+    ``quality/history.jsonl``. ``history_from`` is a history published by an
+    earlier run: its lines are merged in by run id first, so that a run that
+    starts from an empty or an old cache does not shrink the history.
     """
     finished_at = now()
     with gather(root, finished_at.date()) as evidence:
@@ -113,7 +116,7 @@ def build_report(
             ],
         }
     directory = quality_dir(root)
-    history = _add_to_history(directory / HISTORY_NAME, _history_line(report))
+    history = _add_to_history(directory / HISTORY_NAME, _history_line(report), history_from)
     report["history"] = history[-HISTORY_IN_REPORT:]
     _write(directory / REPORT_NAME, json.dumps(report, indent=2, ensure_ascii=False) + "\n")
     return report
@@ -233,7 +236,8 @@ def _rules(evidence: Evidence) -> list[dict[str, Any]]:
                     "description": rule.description,
                     "description_pt": rule.description_pt,
                     "rows": rows,
-                    "share": round(rows / raw_rows, 6) if raw_rows else 0.0,
+                    # Four significant digits: one row in seven million is not zero.
+                    "share": float(f"{rows / raw_rows:.4g}") if raw_rows else 0.0,
                     "by_year": by_year,
                 }
             )
@@ -284,23 +288,29 @@ def _history_line(report: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
-def _add_to_history(path: Path, line: dict[str, Any]) -> list[dict[str, Any]]:
+def _add_to_history(
+    path: Path, line: dict[str, Any], history_from: Path | None = None
+) -> list[dict[str, Any]]:
     """Put the line of this run at the end of the history file and return the history."""
-    earlier = _read_history(path)
-    history = [old for old in earlier if old["run_id"] != line["run_id"]] + [line]
-    history = history[-HISTORY_KEPT:]
+    if history_from is not None and not history_from.is_file():
+        raise FileNotFoundError(f"{history_from}: no history to merge")
+    runs = {run["run_id"]: run for run in _read_history(history_from) if history_from}
+    runs.update((run["run_id"], run) for run in _read_history(path))  # local lines win
+    runs.pop(line["run_id"], None)
+    earlier = sorted(runs.values(), key=lambda run: (str(run.get("finished_at")), run["run_id"]))
+    history = [*earlier, line][-HISTORY_KEPT:]
     _write(path, "".join(json.dumps(run, ensure_ascii=False) + "\n" for run in history))
     return history
 
 
-def _read_history(path: Path) -> list[dict[str, Any]]:
+def _read_history(path: Path | None) -> list[dict[str, Any]]:
     """The runs of the history file, leaving out any line that is not one.
 
     The file comes back from a release asset when the cache is empty, and can be
     edited by hand. A damaged line must not stop every later run from getting a
     report: it is left out, with a warning, and not written back.
     """
-    if not path.exists():
+    if path is None or not path.exists():
         return []
     runs, damaged = [], []
     for number, text in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):

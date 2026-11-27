@@ -1,7 +1,14 @@
 # 0001 — Where data lives between pipeline runs
 
-- Status: accepted
+- Status: accepted; superseded in part by [0002](0002-what-is-published.md)
 - Date: 2026-11-26
+
+> **What changed in 0002.** The state between runs lives in the Actions cache;
+> the `data-latest` release holds only the public aggregates, the collection
+> manifest and the quality history. A landing zone now keeps every downloaded
+> file, and the 60-day limit on scheduled workflows is handled by the
+> keepalive job of the Pipeline workflow. The rule of uploading the manifest
+> last still applies.
 
 ## Context
 

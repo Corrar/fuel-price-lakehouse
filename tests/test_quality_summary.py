@@ -50,7 +50,7 @@ def test_summary_lists_the_checks_that_did_not_pass_and_only_those(tmp_path):
 
 def test_rule_that_caught_rows_never_shows_a_share_of_zero(tmp_path):
     lake = Lake()
-    # 1 row in 2,000,000: below the six decimals the report keeps for a share.
+    # 1 row in 2,000,000: less than the four decimals of a percentage shown.
     lake.collection[MONTHLY]["rows"] = 2_000_000 - 300
     lake.staging[MONTHLY] = staged(lake.collection[MONTHLY], not_an_exact_duplicate=1)
     lake.staging[MONTHLY]["rule_warnings"] = {"postal_code_is_valid": 2_000}

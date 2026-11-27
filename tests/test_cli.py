@@ -9,6 +9,7 @@ import pytest
 
 from fuel_price_lakehouse import cli
 from fuel_price_lakehouse.collect.run import run as collect
+from fuel_price_lakehouse.release import PUBLIC_RECORD_FIELDS
 from fuel_price_lakehouse.stage.cnpj import has_valid_check_digits
 
 from .conftest import FOUR_WEEKS, OCTOBER_DIESEL, OCTOBER_GASOLINE, OCTOBER_LPG, anp_csv
@@ -41,14 +42,18 @@ def test_every_step_has_a_subcommand():
         assert parser.parse_args([command]).handler is not None
 
 
-def test_offline_run_builds_the_site_and_writes_the_summary(web, tmp_path, fast):
-    root, site, summary = tmp_path / "data", tmp_path / "site", tmp_path / "summary.md"
-    # Enough distinct stations for a public cell (small cells are suppressed).
+def collected(web, root, fast) -> None:
+    """Collect a small history with enough distinct stations for public cells."""
     for url in (OCTOBER_DIESEL, OCTOBER_GASOLINE, OCTOBER_LPG, FOUR_WEEKS):
         web.files[url] = three_stations()
     with web.client() as client:
         settings = {key: fast[key] for key in ("sleep", "retry", "now")}
         collect(root, date(2026, 7, 1), client=client, **settings)
+
+
+def test_offline_run_builds_the_site_and_writes_the_summary(web, tmp_path, fast):
+    root, site, summary = tmp_path / "data", tmp_path / "site", tmp_path / "summary.md"
+    collected(web, root, fast)
 
     status = cli.main(
         [
@@ -74,3 +79,35 @@ def test_failed_quality_gate_publishes_nothing(web, tmp_path, fast):
 
     assert status == cli.QUALITY_GATE_FAILED
     assert not site.exists()
+
+
+def test_release_holds_the_public_tables_and_a_manifest_without_local_details(web, tmp_path, fast):
+    root, out = tmp_path / "data", tmp_path / "release"
+    collected(web, root, fast)
+    cli.main(["--root", str(root), "run", "--offline", "--since", "2026-07"])
+
+    status = cli.main(["--root", str(root), "release", "--out", str(out)])
+
+    assert status == cli.OK
+    names = sorted(path.name for path in out.iterdir())
+    assert "collection.json" in names and "history.jsonl" in names
+    assert "fuel_price.parquet" not in names  # station-level, never released
+    files = json.loads((out / "collection.json").read_text(encoding="utf-8"))["files"]
+    assert files
+    for record in files.values():
+        assert set(record) == {*PUBLIC_RECORD_FIELDS, "superseded"}
+    text = (out / "collection.json").read_text(encoding="utf-8")
+    for local in ("raw_path", "landing_path", "last_error", "details", str(root)):
+        assert local not in text
+
+
+def test_crash_has_its_own_exit_code(monkeypatch, tmp_path, caplog):
+    def crash(args):
+        raise RuntimeError("disk full")
+
+    monkeypatch.setattr(cli, "_curate", crash)
+
+    status = cli.main(["--root", str(tmp_path), "curate"])
+
+    assert status == cli.CRASHED != cli.SOME_FILES_FAILED
+    assert "curate: crashed" in caplog.text and "disk full" in caplog.text

@@ -1,0 +1,219 @@
+name: Pipeline
+
+# Collects, validates and publishes the data (ADR 0002), twice a week at 10:17
+# UTC. ANP updates the series weekly on a day it does not announce: the Tuesday
+# run usually finds the new week, and the Friday run picks up a late one. Both
+# also keep the data cache in use; GitHub evicts a cache after seven days
+# without access.
+#
+# Jobs, each with only the permissions it needs:
+#   build     runs the pipeline with read-only access; uploads the site and the
+#             release assets as artifacts when the quality gate passes
+#   publish   replaces the assets of the data-latest release
+#   deploy    deploys the site to GitHub Pages
+#   keepalive keeps a scheduled workflow from being disabled after 60 days
+#             without activity in the repository
+on:
+  schedule:
+    - cron: "17 10 * * 2"
+    - cron: "17 10 * * 5"
+  workflow_dispatch:
+    inputs:
+      full_check:
+        description: "Download every source file again and compare hashes"
+        type: boolean
+        default: false
+
+permissions: {}
+
+concurrency:
+  group: pipeline
+  cancel-in-progress: false
+
+env:
+  SINCE: "2020-01"
+  DATA_RELEASE: data-latest
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      contents: read
+    outputs:
+      publishable: ${{ steps.pipeline.outputs.publishable }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --locked --no-dev
+
+      - name: Restore the data of the previous run
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: data
+          key: data-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: data-
+
+      - name: Download the published quality history
+        id: history
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Merged on every run, so the history outlives a lost cache. Only a
+          # missing release or asset means there is no history yet; any other
+          # error stops the run instead of publishing a history without its past.
+          mkdir -p build/published
+          if output=$(gh release download "$DATA_RELEASE" --repo "$GITHUB_REPOSITORY" \
+              --pattern history.jsonl --dir build/published 2>&1); then
+            echo "args=--history-from build/published/history.jsonl" >> "$GITHUB_OUTPUT"
+          elif grep -qiE "release not found|no assets match" <<< "$output"; then
+            echo "No published history yet: this run starts it."
+          else
+            echo "$output" >&2
+            exit 1
+          fi
+
+      - name: Decide whether this run audits every source file
+        id: audit
+        env:
+          FULL_CHECK: ${{ inputs.full_check }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          # Between audits a file is downloaded again only when its size or the
+          # page's update date changed. The first Tuesday run of each month
+          # downloads everything and compares hashes.
+          if [ "$FULL_CHECK" = "true" ] || \
+             { [ "$EVENT" = "schedule" ] && [ "$(date -u +%d)" -le 7 ] && \
+               [ "$(date -u +%u)" = "2" ]; }; then
+            echo "args=--full-check" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run the pipeline
+        id: pipeline
+        env:
+          AUDIT: ${{ steps.audit.outputs.args }}
+          HISTORY: ${{ steps.history.outputs.args }}
+        run: |
+          set +e
+          # AUDIT and HISTORY are left unquoted on purpose: each holds options.
+          # shellcheck disable=SC2086
+          uv run --no-sync fuel-lakehouse run --since "$SINCE" --site build/site \
+            --summary "$GITHUB_STEP_SUMMARY" --code-version "$GITHUB_SHA" $AUDIT $HISTORY
+          status=$?
+          set -e
+          # 0: the site was built. 1: built too, but some source files failed and
+          # are tried again on the next run (the report says which). 2: the
+          # quality gate failed or the site builder refused: nothing is
+          # published. 3, or anything else: a crash.
+          case "$status" in
+            0|1)
+              if [ ! -f build/site/data/meta.json ]; then
+                echo "::error::The pipeline exited with $status but built no site."
+                exit 1
+              fi
+              if [ "$status" = 1 ]; then
+                echo "::warning::Some source files failed; the next run tries them again."
+              fi
+              echo "publishable=true" >> "$GITHUB_OUTPUT"
+              ;;
+            2)
+              echo "::error::The quality gate failed: nothing is published."
+              exit 2
+              ;;
+            *)
+              echo "::error::The pipeline crashed (exit code $status)."
+              exit "$status"
+              ;;
+          esac
+
+      - name: Save the data for the next run
+        if: always()
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: data
+          key: data-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Assemble the release assets
+        if: steps.pipeline.outputs.publishable == 'true'
+        run: uv run --no-sync fuel-lakehouse release --out build/release
+
+      - name: Upload the release assets
+        if: steps.pipeline.outputs.publishable == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release
+          path: build/release
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload the site
+        if: steps.pipeline.outputs.publishable == 'true'
+        uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3.0.1
+        with:
+          path: build/site
+
+  publish:
+    needs: build
+    if: needs.build.outputs.publishable == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write # the assets of the data-latest release
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: release
+          path: release
+
+      - name: Publish the public data as release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          if ! gh release view "$DATA_RELEASE" > /dev/null 2>&1; then
+            gh release create "$DATA_RELEASE" --title "Public data (latest run)" \
+              --notes "Aggregates only, rebuilt by the Pipeline workflow. See the README."
+          fi
+          # Tables first, manifest and history last: a reader that sees the new
+          # manifest knows the tables beside it are complete.
+          gh release upload "$DATA_RELEASE" release/*.parquet --clobber
+          gh release upload "$DATA_RELEASE" release/collection.json release/history.jsonl \
+            --clobber
+
+  deploy:
+    needs: [build, publish]
+    if: needs.build.outputs.publishable == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      # Fails with a clear message when Pages is not set to deploy from Actions
+      # (Settings > Pages > Source: GitHub Actions, once per repository).
+      - uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5.0.0
+
+      - id: deployment
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4.0.5
+
+  keepalive:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write # enable this workflow again, which resets the 60-day count
+    steps:
+      - name: Keep the schedule alive
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X PUT "repos/$GITHUB_REPOSITORY/actions/workflows/pipeline.yml/enable"

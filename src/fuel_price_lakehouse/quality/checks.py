@@ -29,6 +29,7 @@ and in the history of runs. Renaming one is a breaking change.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -44,7 +45,13 @@ from fuel_price_lakehouse.collect import landing
 from fuel_price_lakehouse.collect.manifest import FileRecord, Manifest
 from fuel_price_lakehouse.config import Clock, utc_now
 from fuel_price_lakehouse.curate.tables import PUBLIC_TABLES, STATION_LEVEL_COLUMNS, TABLES
-from fuel_price_lakehouse.layout import Source, curated_dir, manifest_path, staging_state_path
+from fuel_price_lakehouse.layout import (
+    Source,
+    curated_dir,
+    last_extract_path,
+    manifest_path,
+    staging_state_path,
+)
 from fuel_price_lakehouse.reference import STATES
 from fuel_price_lakehouse.stage.rules import Severity
 from fuel_price_lakehouse.stage.run import StagedFile, StagingState
@@ -125,6 +132,8 @@ class Evidence:
     """The records of the collection manifest by key. None: there is no manifest."""
     staging: Mapping[str, StagedFile] | None
     """The entries of the staging state by key. None: there is no staging state."""
+    last_extract: Mapping[str, Any] | None
+    """What the latest collection could not get. None: no collection recorded it."""
     connection: duckdb.DuckDBPyConnection
     """A database with one view per curated table in ``tables``, named after it."""
     tables: frozenset[str]
@@ -134,6 +143,11 @@ class Evidence:
         if self.collection is None:
             raise MissingInputError("no collection manifest: run the collection first")
         return self.collection
+
+    def extracted(self) -> Mapping[str, Any]:
+        if self.last_extract is None:
+            raise MissingInputError("no record of the latest collection: run the collection")
+        return self.last_extract
 
     def staged(self) -> Mapping[str, StagedFile]:
         if self.staging is None:
@@ -265,6 +279,17 @@ def _collection_complete(evidence: Evidence) -> Finding:
         expected="0 files never collected, 0 failed downloads",
         detail=_listed(problems),
         severity=None if never else Severity.WARNING,
+    )
+
+
+def _sources_reachable(evidence: Evidence) -> Finding:
+    latest = evidence.extracted()
+    failed = latest.get("failed", [])
+    return Finding(
+        passed=not failed,
+        observed=f"{len(failed)} failures in the latest collection",
+        expected="0 failures",
+        detail=_listed([f"{item['key']}: {item['detail']}" for item in failed]),
     )
 
 
@@ -574,6 +599,15 @@ CHECKS: tuple[Check, ...] = (
         _collection_complete,
     ),
     Check(
+        "sources_reachable",
+        Severity.WARNING,
+        "Every source answered on the latest collection: the ANP landing page could be "
+        "read and no file failed to download.",
+        "Todas as fontes responderam na coleta mais recente: a página da ANP pôde ser lida "
+        "e nenhum arquivo falhou no download.",
+        _sources_reachable,
+    ),
+    Check(
         "raw_files_read_strictly",
         Severity.WARNING,
         "Every ANP file was well-formed CSV: none needed the lenient reader, "
@@ -705,6 +739,7 @@ CHECKS: tuple[Check, ...] = (
 def gather(root: Path, today: date) -> Iterator[Evidence]:
     """Open what the checks read under ``root``. Nothing is written."""
     collection, staging = manifest_path(root), staging_state_path(root)
+    last_extract = last_extract_path(root)
     connection = duckdb.connect()
     try:
         yield Evidence(
@@ -712,6 +747,11 @@ def gather(root: Path, today: date) -> Iterator[Evidence]:
             today=today,
             collection=Manifest.load(collection).files if collection.exists() else None,
             staging=StagingState.load(staging).files if staging.exists() else None,
+            last_extract=(
+                json.loads(last_extract.read_text(encoding="utf-8"))
+                if last_extract.exists()
+                else None
+            ),
             connection=connection,
             tables=_create_views(connection, curated_dir(root)),
         )

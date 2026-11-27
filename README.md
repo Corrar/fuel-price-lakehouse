@@ -1,219 +1,245 @@
 # fuel-price-lakehouse
 
 [![CI](https://github.com/Corrar/fuel-price-lakehouse/actions/workflows/ci.yml/badge.svg)](https://github.com/Corrar/fuel-price-lakehouse/actions/workflows/ci.yml)
+[![Pipeline](https://github.com/Corrar/fuel-price-lakehouse/actions/workflows/pipeline.yml/badge.svg)](https://github.com/Corrar/fuel-price-lakehouse/actions/workflows/pipeline.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-A small, fully automated data pipeline for Brazilian fuel prices.
+**Nearly seven million fuel prices from every Brazilian state, collected,
+validated and published automatically twice a week, with a public data
+quality report.**
 
-Every week it will collect station-level fuel prices published by ANP (CSV
-files) and macroeconomic series from Banco Central do Brasil (JSON API), check
-their quality, quarantine the rows that break a rule, and publish
-analysis-ready Parquet tables together with a data quality report.
+**[Open the dashboard →](https://corrar.github.io/fuel-price-lakehouse/)**
 
-> **Status: stage 4 of 5 — curated tables and quality report.**
-> `make pipeline` collects, validates and aggregates the data, checks it, and
-> builds the data files of the dashboard when the checks pass. The dashboard
-> itself and the scheduled run are the last stage.
+[![The dashboard: the latest national prices, written from the data](docs/images/dashboard.png)](https://corrar.github.io/fuel-price-lakehouse/)
 
-## Roadmap
+## Why this exists
 
-| Stage | Scope | Status |
-| --- | --- | --- |
-| 0 | Sources confirmed, repository foundation, storage decision | Done |
-| 1 | Incremental collection with a file manifest; raw layer | Done |
-| 2 | Typed and normalised staged layer; validation rules; quarantine | Done |
-| 3 | Curated tables for analysis | Done |
-| 4 | Data quality report; data files for the dashboard | Done |
-| 5 | Dashboard on GitHub Pages; scheduled run on GitHub Actions | Not started |
+What fuel costs in Brazil moves inflation, freight and household budgets, and
+ANP (the national petroleum agency) surveys it at thousands of stations every
+week. The data is open, but it is published as hundreds of irregular CSV and
+ZIP files: names that change from month to month, the same week published in
+three different files, a file in another encoding, blank rows, formats that
+change without notice.
 
-## Planned design
+This project turns that into weekly price series that can be trusted:
 
-```
-ANP CSV files ─┐
-               ├─> collect ─> raw ─> staged ─┬─> curated ─> quality report
-BCB SGS API  ──┘   (manifest)                └─> quarantine
-```
+- **Automated end to end.** A scheduled GitHub Actions run collects only what
+  is new, validates every row, rebuilds the tables, checks the result and
+  publishes the dashboard. No server, no paid service, no manual step.
+- **Every row accounted for.** Rows that break a rule are quarantined with the
+  reason, never dropped; the row counts reconcile from the source files to the
+  published tables.
+- **Checked against the source.** For the week of 15 to 21 November 2026, the
+  municipal averages computed here match ANP's own weekly summary for
+  **2,505 of 2,506** municipality-fuel pairs, to the cent
+  ([how](docs/validation.md)).
 
-- **Collect**: incremental, driven by a manifest of files already ingested.
-- **Raw**: a faithful Parquet copy of each downloaded file, every value kept as text.
-- **Staged**: typed, normalised rows that passed validation.
-- **Quarantine**: rows that broke a rule, kept with the reason.
-- **Curated**: tables ready for analysis.
+## In numbers
 
-Stack: Python 3.12, uv, Parquet + DuckDB, Pandera, httpx + tenacity, pytest,
-ruff, GitHub Actions. No paid services.
+| | |
+| --- | ---: |
+| Station-level prices since January 2020 | 6.9 million |
+| Stations / municipalities surveyed | 41,196 / 499 |
+| Survey weeks | 350 |
+| Source files collected (ANP and Banco Central) | 55 |
+| Rows quarantined, with the rule they broke | 9,130 |
+| Validation rules (ANP + Banco Central) / dataset checks | 22 + 5 / 17 |
+| Automated tests (none touch the network) | 583 |
+| A full run when nothing new was published (collection included) | about 1.5 minutes |
 
-## Collection (stage 1)
+## How it works
 
-```sh
-make extract                 # history from 2020-01 (the default)
-make extract SINCE=2026-01   # choose the first month
-make extract SINCE=2004-01 ARGS=--dry-run   # list what would be downloaded, with sizes
-```
-
-What a run does:
-
-- **ANP**: reads the landing page, finds the data files by their links (file
-  names are irregular, so no URL is ever built from a date), and learns each
-  file's period from the link text. A file already in the manifest is checked
-  with a one-byte range request; only new files, or files whose size changed,
-  are downloaded, and the SHA-256 decides whether the content really changed.
-- **Banco Central**: requests series 1 (dollar) and 433 (IPCA) one calendar
-  year per request, inside the API's 10-year limit. Finished years are not
-  requested again; the current year is revalidated with its `ETag`.
-- **Manifest** (`data/manifest/collection.json`): source URL, collection time,
-  size, SHA-256 and row count of every file. It is saved after each file, so a
-  run that fails halfway resumes where it stopped.
-- **Raw layer** (`data/raw/`): a faithful copy in Parquet. Every source column
-  is text exactly as received (decimal commas, padded CNPJ and empty strings
-  included), plus tracking columns: `_source_url`, `_source_sha256`,
-  `_collected_at`, `_row_number`.
-- Requests go one at a time with a pause between them. Network errors, 429 and
-  5xx are retried with exponential backoff.
-
-Running it twice in a row downloads nothing and rewrites nothing. `--full-check`
-downloads everything again and compares hashes, for an occasional audit.
-
-How much history to load (measured on 2026-11-26, details in
-[`docs/sources.md`](docs/sources.md)):
-
-| `SINCE` | Download | Estimated time at 0.75 MB/s |
-| --- | ---: | ---: |
-| `2026-01` | 96 MB | 2 min |
-| `2023-01` | 242 MB | 5 min |
-| `2020-01` (default) | 603 MB | 13 min |
-| `2004-01` (everything) | 4,813 MB | 107 min |
-
-## Staged layer and quarantine (stage 2)
-
-```sh
-make stage        # type and validate every raw file that changed since the last run
+```mermaid
+flowchart LR
+    A[ANP files<br/>BCB API] --> B[landing<br/>original bytes]
+    B --> C[raw<br/>Parquet, text]
+    C --> D[staged<br/>typed rows]
+    C --> E[quarantine<br/>rows + reasons]
+    D --> F[curated<br/>DuckDB SQL]
+    F --> G{quality<br/>gate}
+    E --> G
+    G -->|pass| H[dashboard<br/>+ downloads]
 ```
 
-- Every raw row ends up in exactly one place: the staged layer (typed:
-  dates, prices, a 14-digit CNPJ, normalised units and whitespace) or the
-  quarantine (the original text of every field, plus the ids of the rules it
-  broke). For every file, rows read = rows staged + rows quarantined.
-- 22 rules for ANP rows and 5 for the Banco Central series, each with an id,
-  a severity and a one-sentence description in English and Portuguese.
-  Error rules send a row to quarantine; warning rules keep it and tag it.
-- A Pandera contract checks the staged table; if it fails, the code has a
-  bug and the run stops.
-- Incremental: a file is staged again only when its raw content or the
-  rules changed. A second run changes no byte.
+1. **Collect** (`collect/`): the ANP landing page is read on every run and
+   file names are never built from dates. A file already collected costs a
+   one-byte range request; it is downloaded again only when its size or the
+   "updated" date on ANP's page changes, and its SHA-256 then decides whether
+   the content really changed. The first Tuesday run of each month downloads
+   everything again, to catch a republication that kept the same size. Every
+   download is kept byte for byte in a content-addressed landing zone, so the
+   raw layer can be rebuilt without the network.
+2. **Stage** (`stage/`): 27 rules (22 for ANP rows, 5 for Banco Central rows),
+   each with an id, a severity and a description in English and Portuguese,
+   judge the rows; a row that breaks an error rule is quarantined, a warning
+   only flags it. A Pandera contract checks the result. Only files whose
+   content changed are processed again.
+3. **Curate** (`curate/`): DuckDB SQL removes the repetition between ANP's
+   files, buckets prices into ANP survey weeks, aggregates them by country,
+   region, state and flag type, and deflates them by IPCA. Aggregates built
+   from fewer than three stations are not published.
+4. **Report** (`quality/`): 17 dataset checks roll up into pass, warn or
+   fail. A failed error check is a circuit breaker: nothing is published and
+   the dashboard keeps showing the last good run. A failed warning check is
+   reported, and the run is still published.
+5. **Publish** (`site/`): a static dashboard on GitHub Pages and the public
+   tables as Parquet and CSV downloads.
 
-On the history since 2020: 6,965,798 rows staged and 9,130 in quarantine
-(9,114 blank rows at the end of one file and 16 exact duplicates), 55 files
-in about 50 seconds. The decisions behind this are in
-[ADR 0003](docs/decisions/0003-validation-and-quarantine.md).
+More in [`docs/architecture.md`](docs/architecture.md).
 
-## Curated tables (stage 3)
+## Engineering choices worth a look
 
-```sh
-make curate       # rebuild every curated table from the staged layer (about 12 s)
-```
-
-- `fuel_price`: one row per station, product and collection date. ANP publishes
-  the same observation in up to three files (semester, month, last four
-  weeks); a fixed precedence keeps one, and the row records how many
-  candidates it had and whether they disagreed on the price.
-- Weekly aggregates by country, region, state and flag type (branded or
-  white-flag), in ANP survey weeks (Sunday to Saturday): stations, mean,
-  median, 10th and 90th percentiles. The national table adds the week's
-  dollar rate and the price in money of the latest IPCA month.
-- **Small-cell suppression**: an aggregate built from fewer than three
-  stations is not written, so no public number stands for one or two
-  businesses. Station-level tables are never published
+- **Idempotent and incremental.** Running the pipeline again with nothing new
+  downloads nothing and rebuilds byte-identical tables; only the run's own
+  record (build time, quality report, history line) is rewritten. An
+  interrupted run resumes where it stopped. The manifest records every source
+  file's hash, and the versions it replaced.
+- **Quarantine, not delete.** `rows read = rows staged + rows quarantined`,
+  for every file, enforced by the code
+  ([ADR 0003](docs/decisions/0003-validation-and-quarantine.md)).
+- **Contracts at every boundary.** The staged tables, the curated tables and
+  the dashboard's data files each have a schema checked before anything is
+  written.
+- **Only aggregates are published.** Station-level data stays in the data
+  folder of the machine that runs the pipeline (on GitHub, the Actions cache
+  between runs) and is never uploaded as a release asset or a page; a test
+  fails if a public table gains a station column. Cells with fewer than three
+  stations are left out, which keeps a single station's price off the
+  dashboard but is not a formal disclosure-control guarantee
   ([ADR 0002](docs/decisions/0002-what-is-published.md)).
-- Every table has a contract (key, types, value sets, row conditions) checked
-  after the build; [`docs/data-dictionary.md`](docs/data-dictionary.md) is
-  generated from the same registry.
+- **Least privilege in CI.** The scheduled run builds with read-only access;
+  separate jobs publish the release, deploy the site and keep the schedule
+  alive, each with only the permission it needs; every action is pinned to a
+  commit.
+- **Documentation that cannot drift.** The [rules](docs/quality-rules.md) and
+  the [data dictionary](docs/data-dictionary.md) are generated from the code,
+  and a test fails when they are stale.
+- **Measured before built.** Every quirk the code handles was first found in
+  the real files and written down in [`docs/sources.md`](docs/sources.md).
 
-**Checked against ANP's own figures.** For the survey week of 15 to 21
-November 2026, the municipal averages computed from the curated table match
-ANP's official weekly summary for 2,505 of 2,506 municipality-product pairs:
-same number of stations, same minimum, maximum and mean to the cent. The one
-difference is a station ANP files under a neighbouring municipality. National
-figures differ from ANP's by design: ANP weights states by sales volume, which
-is not in the open data, and this project publishes simple means over surveyed
-stations. Details in [`docs/validation.md`](docs/validation.md).
+## The dashboard
 
-## Quality report (stage 4)
+Portuguese by default, English on demand, light and dark, every view shareable
+by link. It shows:
 
-```sh
-make report       # run the dataset checks and write data/quality/report.json
-make pipeline     # everything: extract, stage, curate, report, and the site data if it passes
-```
+- the latest week at a glance: national averages, weekly and yearly change, in
+  nominal and inflation-adjusted terms;
+- price history since 2020 for any fuel, for Brazil, a region or several
+  states, with the dollar for comparison and dated policy events;
+- a tile map of the 27 states for any week, with a ranking;
+- whether ethanol is worth it against gasoline in each state (the 70 % rule
+  of thumb);
+- branded against white-flag stations;
+- the data quality report: the row funnel, every rule and check, every source
+  file, and the history of runs.
 
-- 16 dataset checks: every file collected and staged as it is now, landed
-  bytes still matching their hashes, row counts that reconcile from raw to
-  staged, quarantine rate, unique keys, freshness, all 27 states in the latest
-  week, the latest week's volume, unexpected survey gaps, sudden weekly price
-  moves, the exchange rate and IPCA up to date, no station-level column in a
-  public table.
-- The result is `pass`, `warn` or `fail`. A failed error check is a circuit
-  breaker: the dashboard keeps showing the last good run.
-- Each run adds one line to `data/quality/history.jsonl`; the report keeps the
-  rule counts per file and per year, and never a row-level value.
+| | |
+| --- | --- |
+| ![Price history with the p10-p90 spread and dated policy events](docs/images/explorer.png) | ![Every state against the national average, on a tile map and a ranking](docs/images/states.png) |
+| ![The data quality report: from raw rows to curated rows](docs/images/quality.png) | ![Ethanol or gasoline, in English and in the dark theme](docs/images/parity-en-dark.png) |
 
-The latest run on the history since 2020 passed every check: 6,976,741 rows
-collected in 55 files, 6,967,612 staged, 9,130 in quarantine, 6,945,021
-prices after removing 20,777 repeated rows, 1,759 small cells suppressed. The
-whole pipeline takes about a minute when nothing has to be downloaded.
-
-## Documentation
-
-- [`docs/sources.md`](docs/sources.md) — what the two sources actually look
-  like: URLs, formats, volumes, limits, licences and the data problems found
-  in samples.
-- [`docs/validation.md`](docs/validation.md) — the curated figures checked
-  against ANP's own weekly summary.
-- [`docs/quality-rules.md`](docs/quality-rules.md) and
-  [`docs/data-dictionary.md`](docs/data-dictionary.md) — the row-level rules
-  and the curated tables, generated from the code.
-- [`docs/decisions/0001-storage-between-runs.md`](docs/decisions/0001-storage-between-runs.md)
-  — where the data lives between runs, and why.
-- [`docs/decisions/0002-what-is-published.md`](docs/decisions/0002-what-is-published.md)
-  — what leaves the machine that runs the pipeline (aggregates only).
-- [`docs/decisions/0003-validation-and-quarantine.md`](docs/decisions/0003-validation-and-quarantine.md)
-  — validation rules, quarantine, and what is incremental.
-
-## Development
+## Run it yourself
 
 Requires [uv](https://docs.astral.sh/uv/).
 
 ```sh
-make install   # create the virtualenv from the lockfile
-make check     # lint + tests, the same thing CI runs (tests never touch the network)
-make format    # auto-fix and format
+make install                 # the virtualenv, from the lockfile
+make pipeline                # collect (about 600 MB the first time), validate, build, check
+uv run python -m http.server -d build/site 8000   # then open http://localhost:8000
 ```
 
-## Data sources
+`make pipeline SINCE=2024-01` starts the history later. Each step also runs on
+its own (`make extract`, `stage`, `curate`, `report`, `site`); `make help`
+lists them. `make check` runs what CI runs: ruff, mypy, the tests and the
+static checks of the front-end. After a run, `uv run python
+tools/validate_against_anp.py <weekly summary>.xlsx` repeats the check against
+ANP's own figures ([validation](docs/validation.md)).
 
-- ANP — Série Histórica de Preços de Combustíveis (open data).
-- Banco Central do Brasil — SGS time series API (open data).
+To run the schedule from a fork, set **Settings → Pages → Source** to
+**GitHub Actions** once; the workflow does the rest with the token GitHub
+provides, without any secret.
 
-This project is not affiliated with ANP or Banco Central do Brasil. See
-[`docs/sources.md`](docs/sources.md) for the terms of use of each source.
+## Repository layout
+
+```
+src/fuel_price_lakehouse/
+  collect/    landing page discovery, HTTP with retries, manifest, landing zone, raw layer
+  stage/      rule engine, ANP and Banco Central rules, incremental driver
+  curate/     table registry and contracts, DuckDB SQL (sql/*.sql)
+  quality/    dataset checks, quality report, run history
+  site/       data files for the dashboard, downloads; static/ is the front-end
+  cli.py      fuel-lakehouse: one subcommand per step, and run for all of them
+tests/        pytest, against a fake ANP site and a fake Banco Central API
+tools/        the check against ANP's weekly summary; static checks of the front-end
+docs/         sources, architecture, validation, decisions, generated references
+.github/      CI on every push; the scheduled pipeline
+```
+
+Stack: Python 3.12, uv, httpx, tenacity, pandas, Pandera, PyArrow, DuckDB,
+pytest, ruff, mypy; Observable Plot and D3 on the front-end; GitHub Actions
+and GitHub Pages.
+
+## Documentation
+
+| Document | What it covers |
+| --- | --- |
+| [`docs/sources.md`](docs/sources.md) | The two sources as measured: URLs, formats, volumes, limits, licences, quirks |
+| [`docs/architecture.md`](docs/architecture.md) | Layers, state files and what each step guarantees |
+| [`docs/validation.md`](docs/validation.md) | The curated figures checked against ANP's own weekly summary |
+| [`docs/quality-rules.md`](docs/quality-rules.md) | Every row-level rule (generated) |
+| [`docs/data-dictionary.md`](docs/data-dictionary.md) | Every curated table and column (generated) |
+| [`docs/decisions/`](docs/decisions/) | Why: storage between runs, what is published, validation and quarantine, the static dashboard |
+
+The project was built in reviewed stages, one pull request each:
+[sources and foundation](https://github.com/Corrar/fuel-price-lakehouse/pull/1),
+[collection](https://github.com/Corrar/fuel-price-lakehouse/pull/4),
+[staged layer](https://github.com/Corrar/fuel-price-lakehouse/pull/5),
+[curated tables and quality report](https://github.com/Corrar/fuel-price-lakehouse/pull/6),
+[dashboard and schedule](https://github.com/Corrar/fuel-price-lakehouse/pull/7).
+
+## Data sources and licences
+
+- **ANP — Série Histórica de Preços de Combustíveis.** No licence is declared
+  for this dataset; Decreto 8.777/2016 makes federal open data free to use with
+  credit to the source. This project publishes **aggregates only**, always
+  credited ([details](docs/sources.md#16-licence)).
+- **Banco Central do Brasil — SGS** (series 1, dollar exchange rate; series
+  433, IPCA).
+
+This project is not affiliated with ANP or Banco Central do Brasil. Its
+averages are simple means over the surveyed stations and differ slightly from
+ANP's sales-weighted state and national bulletins. ANP surveys a sample of
+stations that changes a little every week (about 80 % of them recur from one
+week to the next), so small weekly moves include sampling effects.
 
 ## License
 
-The code is released under the [MIT License](LICENSE). The data belongs to its
-publishers and is subject to their own terms, described in
-[`docs/sources.md`](docs/sources.md).
+The code is released under the [MIT License](LICENSE).
 
 ---
 
 ## Resumo em português
 
-Pipeline de dados automatizado para preços de combustíveis no Brasil. Toda
-semana ele vai coletar os preços por posto publicados pela ANP (arquivos CSV)
-e séries do Banco Central (API SGS), conferir a qualidade, separar em
-quarentena as linhas que quebram alguma regra e publicar tabelas prontas para
-análise, com um relatório de qualidade.
+**Quase sete milhões de preços de combustíveis de todo o Brasil, coletados,
+validados e publicados automaticamente duas vezes por semana, com relatório de
+qualidade público.** [Abra o painel →](https://corrar.github.io/fuel-price-lakehouse/)
 
-**Situação: etapa 4 de 5 — tabelas finais e relatório de qualidade.**
-`make pipeline` coleta, valida e agrega os dados, confere a qualidade e gera os
-arquivos do painel quando as verificações passam. As médias municipais
-calculadas aqui batem com as publicadas pela ANP em 2.505 de 2.506 pares
-município-produto na semana de 15 a 21/11/2026. Falta a última etapa: o painel
-no ar e a execução agendada.
+A ANP publica os preços pesquisados em milhares de postos toda semana, mas em
+centenas de arquivos irregulares (nomes que mudam, a mesma semana em três
+arquivos, codificações diferentes, linhas em branco). Este pipeline
+transforma isso em séries semanais confiáveis:
+
+- **Automático de ponta a ponta**: um fluxo agendado no GitHub Actions baixa só
+  o que é novo, valida cada linha, reconstrói as tabelas, confere a qualidade e
+  publica o painel, sem servidor nem custo.
+- **Nenhuma linha some**: o que quebra uma regra vai para a quarentena com o
+  motivo, e as contagens fecham do arquivo de origem até a tabela publicada.
+- **Conferido com a fonte**: na semana de 15 a 21/11/2026, as médias
+  municipais calculadas aqui batem com o resumo semanal oficial da ANP em
+  2.505 de 2.506 pares município-combustível, ao centavo.
+- **Só agregados**: nada por posto é publicado; os dados por posto ficam na
+  pasta de dados de quem roda o pipeline (no GitHub, no cache do Actions entre
+  as execuções).
+
+Para rodar: `make install` e `make pipeline`. A documentação técnica está em
+inglês, na pasta [`docs/`](docs/).

@@ -108,12 +108,12 @@ def _rules(rules: Sequence[Mapping[str, Any]]) -> list[str]:
 def _share(rule: Mapping[str, Any]) -> str:
     """The share of the source a rule caught, never 0 % when it caught a row.
 
-    The report keeps six decimals of a share, the four of a percentage shown
-    here: one row in seven million would otherwise read as nothing caught.
+    The report keeps four significant digits of a share; a percentage is shown
+    here with four decimals, so one row in seven million would otherwise read
+    as nothing caught.
     """
-    if rule["rows"] and not rule["share"]:
-        return "< 0.0001%"
-    return f"{rule['share']:.4%}"
+    shown = f"{rule['share']:.4%}"
+    return "< 0.0001%" if rule["rows"] and shown == f"{0:.4%}" else shown
 
 
 def _table(header: Sequence[str], alignment: str, rows: Sequence[Sequence[str]]) -> str:

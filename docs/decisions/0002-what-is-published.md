@@ -23,24 +23,29 @@ staged and curated station-level tables therefore cannot live in a release.
 
 ## Decision
 
-### What leaves the machine that ran the pipeline
+### What is published
 
 | Output | Published | Where |
 | --- | --- | --- |
 | Dashboard: weekly aggregates by country, region and state, and the quality report | Yes | GitHub Pages |
 | Aggregate tables (`agg_*`), exchange rate and IPCA tables, as Parquet | Yes | Assets of the `data-latest` release |
-| Collection manifest: URL, size and SHA-256 of every source file ingested | Yes | Asset of the `data-latest` release |
+| Collection manifest: URL, size, SHA-256, rows and collection time of every source file ingested, and of the versions they replaced (no local paths, no error text) | Yes | Asset of the `data-latest` release, written by `fuel-lakehouse release` |
 | Quality history: one line of counts per run | Yes | Asset of the `data-latest` release |
-| Landing, raw, staged and quarantine layers; station-level curated tables | **No** | Stay on the runner |
+| Landing, raw, staged and quarantine layers; station-level curated tables | **No** | The machine that ran the pipeline, and the repository's Actions cache between scheduled runs |
 
 Guard rails, enforced in code rather than by convention:
 
 - The set of public tables is a whitelist in one place, and a test fails if a
   public table has a station-level column (CNPJ, station name, address).
 - **Small-cell suppression**: an aggregate row built from fewer than three
-  distinct stations is not written, so a public number never stands for one or
-  two identifiable businesses.
-- The quality report carries counts only, never example rows.
+  distinct stations is not written, which keeps a single station's price off
+  the dashboard. It is not a disclosure-control guarantee: there is no
+  complementary suppression, so a hidden state cell can sometimes be worked
+  out from its region's total and the states that are published. A guarantee
+  would need complementary suppression at every level; it is not needed for
+  data ANP itself publishes station by station.
+- The quality report carries counts only, never example rows, and no error
+  message that could quote a source row.
 - Every public view credits "ANP — Série Histórica de Preços de Combustíveis"
   and "Banco Central do Brasil — SGS".
 
@@ -61,9 +66,17 @@ which 0001 rejected as a *store* and which is used here only as an
 - The one thing that cannot be recomputed is the **quality history** (what
   past runs saw). It is small and contains only counts, so it is published as
   a release asset and restored from there when the cache is empty.
-- The pipeline runs **twice a week** (Tuesday, after ANP's Monday update, and
-  Friday). The second run picks up late publications and new exchange rates,
-  and keeps the cache from reaching the seven-day limit.
+- The cache is not a publication, but it is not access-controlled storage
+  either: workflows of this repository can read it. That is acceptable here
+  because the station-level rows are ANP's own open data; the decision above
+  is about what this project republishes, not about secrecy.
+- The quality history is downloaded and merged on every run, not only when the
+  cache is empty, so neither a lost cache nor an older one can shorten it; a
+  download error other than "no release yet" stops the run.
+- The pipeline runs **twice a week**, Tuesday and Friday. ANP does not announce
+  the day it updates the series; the second run picks up a late publication
+  and new exchange rates, and keeps the cache from reaching the seven-day
+  limit.
 
 ### Audits
 
@@ -72,13 +85,14 @@ Banco Central series are not requested again. Both are cheap and can miss a
 republication that keeps the size, or a revised old value. The first scheduled
 run of each month therefore runs with `--full-check`: everything is downloaded
 again and compared by SHA-256, and anything that changed is re-ingested, with
-the replaced version noted in the manifest (`superseded`).
+the replaced version noted in the manifest (`superseded`). In the workflow
+this is the first Tuesday run of each month.
 
 ## Consequences
 
 - Anyone can verify the published aggregates: the manifest lists the exact
   source files (with hashes) and the code is in this repository.
-- The station-level tables exist only where the pipeline runs. To explore
+- The station-level tables are never published by this project. To explore
   them, clone the repository and run the pipeline locally.
 - Every downloaded file is kept byte for byte in a landing zone, addressed by
   its SHA-256 and compressed (ZIP files as they came, the rest with zstd). The

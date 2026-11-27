@@ -6,6 +6,7 @@ the source are not downloaded or rewritten.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable, Sequence
 from datetime import date, datetime
 from pathlib import Path
@@ -23,7 +24,7 @@ from fuel_price_lakehouse.collect.raw import (
     write_json_records,
 )
 from fuel_price_lakehouse.config import Clock, utc_now
-from fuel_price_lakehouse.layout import Source, downloads_dir, manifest_path
+from fuel_price_lakehouse.layout import Source, downloads_dir, last_extract_path, manifest_path
 
 SOURCES = ("anp", "bcb_sgs")
 
@@ -55,7 +56,27 @@ def run(
         )
     if not dry_run:
         manifest.save()
+        _record_last_extract(root, outcomes)
     return outcomes
+
+
+def _record_last_extract(root: Path, outcomes: list[Outcome]) -> None:
+    """Write what this collection could not get, for the ``sources_reachable`` check.
+
+    The manifest has no place for a source that did not answer at all (the ANP
+    landing page is not a file), so the failures of the latest collection are
+    kept here. The file is rewritten only when they change, so a run with
+    nothing new still changes no byte.
+    """
+    failed = [{"key": o.key, "detail": o.detail} for o in outcomes if o.action == "failed"]
+    text = json.dumps({"failed": failed}, indent=2, ensure_ascii=False) + "\n"
+    path = last_extract_path(root)
+    if path.exists() and path.read_text(encoding="utf-8") == text:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(path.name + ".tmp")
+    temporary.write_text(text, encoding="utf-8")
+    temporary.replace(path)
 
 
 def rebuild_raw(root: Path) -> list[Outcome]:

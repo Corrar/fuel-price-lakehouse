@@ -17,6 +17,16 @@ week: per state, municipality and product, the stations with a price in the
 week (each counted once, with the mean of its prices that week, as in the
 curated aggregates), with exact fractions instead of floating point.
 
+To repeat it, after a run of the pipeline, with the workbook downloaded:
+
+```sh
+uv run python tools/validate_against_anp.py resumo_semanal_lpc_2026_11_15_2026-11-21.xlsx
+```
+
+[`tools/validate_against_anp.py`](../tools/validate_against_anp.py) reads the
+week from the workbook, so any later weekly summary can be checked the same
+way; it exits with 1 when fewer than 99 % of the municipal pairs match.
+
 ## Municipalities: the means are reproduced
 
 ANP computes the municipal average as a simple mean of the surveyed stations,
@@ -66,10 +76,15 @@ The dashboard states this where it shows national and state averages.
 
 ## What else was reconciled
 
-On the full history since 2020, independently of the code under test:
+The quality report checks on every run that the rows reconcile from the
+source files to the published tables (`row_counts_reconcile`), that no key of
+the fact table appears twice (`fuel_price_key_unique`) and that no public table
+gains a station column. When the curated layer was first built, these were also
+checked once by hand on the full history since 2020, independently of the code
+under test:
 
-- Staged rows = curated rows + repeated rows removed (6,965,798 = 6,945,021 +
-  20,777); every staged key is in the curated table, none twice.
+- Staged ANP rows = curated rows + repeated rows removed (6,965,798 =
+  6,945,021 + 20,777); every staged key is in the curated table, none twice.
 - For the 20,773 keys published in two files, the row kept is the one the
   precedence rule says, in every case. The 4 keys whose rows disagree on the
   price are the 4 found when profiling the source.
@@ -77,6 +92,3 @@ On the full history since 2020, independently of the code under test:
   arithmetic (means, and percentiles by linear interpolation): no difference.
 - The cells suppressed are exactly those with fewer than three stations; the
   weeks without a survey have no row.
-- The quality report: all 109 numbers (funnel, rule counts per year, file
-  counts, every check's observed value) were recomputed from the Parquet files
-  and agree.

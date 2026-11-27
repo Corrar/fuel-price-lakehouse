@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help install lint typecheck format test check extract stage curate report site pipeline docs clean
+.PHONY: help install lint typecheck format test site-check check extract stage curate report site pipeline docs clean
 
 help: ## Show available targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "} {printf "  %-11s %s\n", $$1, $$2}'
@@ -21,7 +21,10 @@ typecheck: ## Static type check of the package
 test: ## Run the test suite with coverage (never touches the network)
 	uv run pytest --cov --cov-report=term-missing:skip-covered
 
-check: lint typecheck test ## Everything CI runs
+site-check: ## Static checks of the dashboard front-end (syntax, strings in both languages)
+	node tools/check_site.mjs
+
+check: lint typecheck test site-check ## Everything CI runs
 
 extract: ## Collect what is new into the raw layer (SINCE=YYYY-MM sets the first month)
 	uv run fuel-lakehouse extract $(if $(SINCE),--since $(SINCE)) $(ARGS)
