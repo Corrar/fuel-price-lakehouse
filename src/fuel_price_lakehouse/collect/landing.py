@@ -8,7 +8,8 @@ SHA-256 in the manifest can be checked again at any time.
 Files are addressed by the hash of their content, so a republished file lands
 next to the version it replaces instead of over it. ZIP files are stored as
 they came; everything else is compressed with zstd, which shrinks ANP's CSV
-files to roughly a tenth.
+files to about a fifth (the 32 CSV files collected since 2020, 517 MB as
+served, take 101 MB).
 """
 
 from __future__ import annotations

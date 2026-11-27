@@ -9,10 +9,10 @@ files) and macroeconomic series from Banco Central do Brasil (JSON API), check
 their quality, quarantine the rows that break a rule, and publish
 analysis-ready Parquet tables together with a data quality report.
 
-> **Status: stage 2 of 5 — staged layer.** `make extract` collects both
-> sources incrementally and `make stage` types and validates every row: rows
-> that break a rule go to quarantine with the reason. Nothing is published
-> yet. This section is updated as each stage lands.
+> **Status: stage 4 of 5 — curated tables and quality report.**
+> `make pipeline` collects, validates and aggregates the data, checks it, and
+> builds the data files of the dashboard when the checks pass. The dashboard
+> itself and the scheduled run are the last stage.
 
 ## Roadmap
 
@@ -21,9 +21,9 @@ analysis-ready Parquet tables together with a data quality report.
 | 0 | Sources confirmed, repository foundation, storage decision | Done |
 | 1 | Incremental collection with a file manifest; raw layer | Done |
 | 2 | Typed and normalised staged layer; validation rules; quarantine | Done |
-| 3 | Curated tables for analysis | Not started |
-| 4 | Data quality report published on GitHub Pages | Not started |
-| 5 | Weekly scheduled run on GitHub Actions | Not started |
+| 3 | Curated tables for analysis | Done |
+| 4 | Data quality report; data files for the dashboard | Done |
+| 5 | Dashboard on GitHub Pages; scheduled run on GitHub Actions | Not started |
 
 ## Planned design
 
@@ -106,11 +106,70 @@ On the history since 2020: 6,965,798 rows staged and 9,130 in quarantine
 in about 50 seconds. The decisions behind this are in
 [ADR 0003](docs/decisions/0003-validation-and-quarantine.md).
 
+## Curated tables (stage 3)
+
+```sh
+make curate       # rebuild every curated table from the staged layer (about 12 s)
+```
+
+- `fuel_price`: one row per station, product and collection date. ANP publishes
+  the same observation in up to three files (semester, month, last four
+  weeks); a fixed precedence keeps one, and the row records how many
+  candidates it had and whether they disagreed on the price.
+- Weekly aggregates by country, region, state and flag type (branded or
+  white-flag), in ANP survey weeks (Sunday to Saturday): stations, mean,
+  median, 10th and 90th percentiles. The national table adds the week's
+  dollar rate and the price in money of the latest IPCA month.
+- **Small-cell suppression**: an aggregate built from fewer than three
+  stations is not written, so no public number stands for one or two
+  businesses. Station-level tables are never published
+  ([ADR 0002](docs/decisions/0002-what-is-published.md)).
+- Every table has a contract (key, types, value sets, row conditions) checked
+  after the build; [`docs/data-dictionary.md`](docs/data-dictionary.md) is
+  generated from the same registry.
+
+**Checked against ANP's own figures.** For the survey week of 15 to 21
+November 2026, the municipal averages computed from the curated table match
+ANP's official weekly summary for 2,505 of 2,506 municipality-product pairs:
+same number of stations, same minimum, maximum and mean to the cent. The one
+difference is a station ANP files under a neighbouring municipality. National
+figures differ from ANP's by design: ANP weights states by sales volume, which
+is not in the open data, and this project publishes simple means over surveyed
+stations. Details in [`docs/validation.md`](docs/validation.md).
+
+## Quality report (stage 4)
+
+```sh
+make report       # run the dataset checks and write data/quality/report.json
+make pipeline     # everything: extract, stage, curate, report, and the site data if it passes
+```
+
+- 16 dataset checks: every file collected and staged as it is now, landed
+  bytes still matching their hashes, row counts that reconcile from raw to
+  staged, quarantine rate, unique keys, freshness, all 27 states in the latest
+  week, the latest week's volume, unexpected survey gaps, sudden weekly price
+  moves, the exchange rate and IPCA up to date, no station-level column in a
+  public table.
+- The result is `pass`, `warn` or `fail`. A failed error check is a circuit
+  breaker: the dashboard keeps showing the last good run.
+- Each run adds one line to `data/quality/history.jsonl`; the report keeps the
+  rule counts per file and per year, and never a row-level value.
+
+The latest run on the history since 2020 passed every check: 6,976,741 rows
+collected in 55 files, 6,967,612 staged, 9,130 in quarantine, 6,945,021
+prices after removing 20,777 repeated rows, 1,759 small cells suppressed. The
+whole pipeline takes about a minute when nothing has to be downloaded.
+
 ## Documentation
 
 - [`docs/sources.md`](docs/sources.md) — what the two sources actually look
   like: URLs, formats, volumes, limits, licences and the data problems found
   in samples.
+- [`docs/validation.md`](docs/validation.md) — the curated figures checked
+  against ANP's own weekly summary.
+- [`docs/quality-rules.md`](docs/quality-rules.md) and
+  [`docs/data-dictionary.md`](docs/data-dictionary.md) — the row-level rules
+  and the curated tables, generated from the code.
 - [`docs/decisions/0001-storage-between-runs.md`](docs/decisions/0001-storage-between-runs.md)
   — where the data lives between runs, and why.
 - [`docs/decisions/0002-what-is-published.md`](docs/decisions/0002-what-is-published.md)
@@ -152,7 +211,9 @@ e séries do Banco Central (API SGS), conferir a qualidade, separar em
 quarentena as linhas que quebram alguma regra e publicar tabelas prontas para
 análise, com um relatório de qualidade.
 
-**Situação: etapa 2 de 5 — camada tratada.** `make extract` baixa só o que é
-novo das duas fontes e `make stage` tipa e valida cada linha: o que quebra uma
-regra vai para a quarentena com o motivo, nunca é descartado em silêncio. Ainda
-não há resultados publicados.
+**Situação: etapa 4 de 5 — tabelas finais e relatório de qualidade.**
+`make pipeline` coleta, valida e agrega os dados, confere a qualidade e gera os
+arquivos do painel quando as verificações passam. As médias municipais
+calculadas aqui batem com as publicadas pela ANP em 2.505 de 2.506 pares
+município-produto na semana de 15 a 21/11/2026. Falta a última etapa: o painel
+no ar e a execução agendada.

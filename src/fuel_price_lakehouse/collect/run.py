@@ -18,6 +18,7 @@ from fuel_price_lakehouse.collect.manifest import FileRecord, Manifest, Outcome
 from fuel_price_lakehouse.collect.raw import (
     CorruptFileError,
     Provenance,
+    file_sha256,
     write_anp_csv,
     write_json_records,
 )
@@ -80,6 +81,7 @@ def rebuild_raw(root: Path) -> list[Outcome]:
             outcomes.append(Outcome(record.key, "failed", detail=str(error)))
             continue
         record.rows = rows
+        record.raw_file_sha256 = file_sha256(root / record.raw_path)
         outcomes.append(Outcome(record.key, "rebuilt", rows=rows, detail=f"{rows:,} rows"))
     manifest.save()
     return outcomes

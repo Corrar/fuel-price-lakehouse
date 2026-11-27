@@ -18,17 +18,24 @@ import hashlib
 import logging
 import re
 import unicodedata
-from dataclasses import dataclass, field
-from datetime import date, timedelta
+from dataclasses import dataclass, field, replace
+from datetime import date, datetime, timedelta
 from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import urljoin
 
+import pyarrow.parquet as pq
+
 from fuel_price_lakehouse.collect import landing
 from fuel_price_lakehouse.collect.http import Fetcher, SourceError, TransientError
 from fuel_price_lakehouse.collect.manifest import FileRecord, Manifest, Outcome
-from fuel_price_lakehouse.collect.raw import CorruptFileError, Provenance, write_anp_csv
-from fuel_price_lakehouse.config import Clock
+from fuel_price_lakehouse.collect.raw import (
+    CorruptFileError,
+    Provenance,
+    file_sha256,
+    write_anp_csv,
+)
+from fuel_price_lakehouse.config import Clock, parse_month
 from fuel_price_lakehouse.layout import Layer, Source, downloads_dir, partition_dir
 
 LANDING_PAGE = (
@@ -40,6 +47,7 @@ DATASET = "fuel_prices"
 logger = logging.getLogger(__name__)
 
 _FILES_MARKER = "/arquivos/shpc/"
+_SNAPSHOT_MARK = "#snapshot-"
 _NOT_DATA = (".pdf",)
 
 SEMESTER = "semester"
@@ -137,7 +145,7 @@ def select(files: list[AnpFile], since: date) -> list[AnpFile]:
     return sorted(chosen, key=lambda f: (order[f.kind], f.period_start or date.max, f.fuel_group))
 
 
-def raw_path(file: AnpFile, root: Path) -> Path:
+def raw_path(file: AnpFile, root: Path, sha256: str) -> Path:
     directory = partition_dir(
         Layer.RAW,
         Source.ANP,
@@ -147,8 +155,13 @@ def raw_path(file: AnpFile, root: Path) -> Path:
         fuel_group=file.fuel_group,
         period=file.period,
     )
-    # The URL hash keeps two links that land in the same partition apart.
-    return directory / f"{hashlib.sha256(file.url.encode()).hexdigest()[:12]}.parquet"
+    # The URL hash keeps two links that land in the same partition apart. A
+    # rolling file gets one raw file per content, so that the version it
+    # replaces can stay on as a snapshot (see ``_keep_snapshot``).
+    name = hashlib.sha256(file.url.encode()).hexdigest()[:12]
+    if file.kind == LAST_FOUR_WEEKS:
+        name += f"-{sha256[:12]}"
+    return directory / f"{name}.parquet"
 
 
 def collect(
@@ -196,6 +209,10 @@ def collect(
             file.period,
             outcome.detail,
         )
+    if not dry_run:
+        for key in _prune_snapshots(manifest, root):
+            logger.info("anp: %-9s %s (covered by closed files)", "pruned", key)
+        manifest.save()
     return outcomes
 
 
@@ -225,17 +242,31 @@ def _collect_file(
     try:
         download = fetcher.download(file.url, downloaded)
         if previous is not None and previous.sha256 == download.sha256:
-            # Same content after all. Remember the new hint so it is not fetched again.
+            # Same content after all. Remember the new hint so it is not fetched
+            # again, and keep the bytes if this record predates the landing zone.
             previous.details = {**previous.details, **file.details}
+            if previous.landing_path is None:
+                landed = landing.store_file(downloaded, download.sha256, Source.ANP, root)
+                previous.landing_path = landed.relative_to(root).as_posix()
             return Outcome(file.url, "unchanged", download.size_bytes, detail="same hash")
         collected_at = now()
         landed = landing.store_file(downloaded, download.sha256, Source.ANP, root)
-        destination = raw_path(file, root)
+        destination = raw_path(file, root, download.sha256)
         copy = write_anp_csv(
             downloaded, destination, Provenance(file.url, download.sha256, collected_at)
         )
     finally:
         downloaded.unlink(missing_ok=True)
+
+    details = {
+        **file.details,
+        "encoding": copy.encoding,
+        "csv_parsing": "lenient" if copy.lenient else "strict",
+    }
+    if file.kind == LAST_FOUR_WEEKS:
+        details["last_collection_date"] = _last_collection_date(destination)
+        if previous is not None:
+            _keep_snapshot(manifest, previous)
 
     manifest.put(
         FileRecord(
@@ -249,17 +280,79 @@ def _collect_file(
             rows=copy.rows,
             raw_path=destination.relative_to(root).as_posix(),
             landing_path=landed.relative_to(root).as_posix(),
+            raw_file_sha256=file_sha256(destination),
             revision=(record.revision if record else 0) + 1,
-            details={
-                **file.details,
-                "encoding": copy.encoding,
-                "csv_parsing": "lenient" if copy.lenient else "strict",
-            },
+            details=details,
             superseded=previous.history_with_current() if previous is not None else [],
         )
     )
     action = "updated" if previous is not None else "new"
     return Outcome(file.url, action, download.size_bytes, copy.rows, f"{copy.rows:,} rows")
+
+
+def _keep_snapshot(manifest: Manifest, previous: FileRecord) -> None:
+    """Keep the replaced content of a rolling file as a record of its own.
+
+    The four-week file drops its oldest week every time ANP replaces it, and
+    the month that week belongs to may not be published yet. Kept as a
+    snapshot, the replaced version stays in the raw and staged layers, and the
+    curated table falls back on it for the rows no newer file carries.
+    """
+    assert previous.sha256 and previous.collected_at  # an ingested record
+    snapshot = replace(
+        previous,
+        key=f"{previous.key}{_SNAPSHOT_MARK}{previous.sha256[:12]}",
+        details={**previous.details, "period": previous.collected_at[:10], "snapshot": "yes"},
+        superseded=[],
+    )
+    manifest.put(snapshot)
+
+
+def _prune_snapshots(manifest: Manifest, root: Path) -> list[str]:
+    """Drop the snapshots whose every date is now in a closed (monthly or semester) file.
+
+    The landing zone keeps their bytes; only the raw copy and the record go.
+    """
+    covered_until: dict[str, date] = {}
+    for record in manifest.files.values():
+        if not record.ingested or record.details.get("kind") not in (MONTHLY, SEMESTER):
+            continue
+        end = _period_end(record.details["kind"], record.details["period"])
+        group = record.details["fuel_group"]
+        for covered in _SEMESTER_COVERS.get(group, {group}):
+            covered_until[covered] = max(covered_until.get(covered, end), end)
+    pruned = []
+    for key, record in list(manifest.files.items()):
+        last = record.details.get("last_collection_date")
+        group_end = covered_until.get(record.details.get("fuel_group", ""))
+        is_snapshot = record.details.get("snapshot") == "yes"
+        if is_snapshot and last and group_end and date.fromisoformat(last) <= group_end:
+            if record.raw_path:
+                (root / record.raw_path).unlink(missing_ok=True)
+            del manifest.files[key]
+            pruned.append(key)
+    return pruned
+
+
+def _period_end(kind: str, period: str) -> date:
+    """Last day covered by a monthly (``2026-10``) or semester (``2026-S1``) file."""
+    if kind == SEMESTER:
+        year, half = period.split("-S")
+        return date(int(year), 6, 30) if half == "1" else date(int(year), 12, 31)
+    first = parse_month(period)
+    return (first + timedelta(days=31)).replace(day=1) - timedelta(days=1)
+
+
+def _last_collection_date(raw_file: Path) -> str:
+    """Latest ``Data da Coleta`` of a raw file, ISO formatted ('' when none is readable)."""
+    column = pq.read_table(raw_file, columns=["Data da Coleta"]).column(0).to_pylist()
+    dates = []
+    for text in column:
+        try:
+            dates.append(datetime.strptime(text.strip(), "%d/%m/%Y").date())
+        except (AttributeError, ValueError):
+            continue
+    return max(dates).isoformat() if dates else ""
 
 
 class _LandingPage(HTMLParser):

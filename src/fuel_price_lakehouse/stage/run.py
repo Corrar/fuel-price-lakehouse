@@ -6,8 +6,9 @@ largest file. What came out is recorded in ``manifest/staging.json``. Staging
 is a pure function of the raw file, its manifest record and ``STAGING_VERSION``,
 so that record is enough to know what does not need doing again.
 
-- Which files are staged: a file that was never staged; a file whose raw
-  SHA-256 is not the one recorded (the source republished it); every file after
+- Which files are staged: a file that was never staged; a file whose source
+  SHA-256 is not the one recorded (the source republished it); a file whose
+  raw Parquet file changed (rebuilt from the landing zone); every file after
   a bump of ``STAGING_VERSION``; a file with an output listed in the state but
   gone from disk; a file whose last attempt failed; every file under
   ``full_refresh``. Any other file is ``unchanged`` and is not even opened.
@@ -48,6 +49,7 @@ import pandas as pd
 import pyarrow as pa
 
 from fuel_price_lakehouse.collect.manifest import Manifest
+from fuel_price_lakehouse.collect.raw import file_sha256
 from fuel_price_lakehouse.config import Clock, utc_now
 from fuel_price_lakehouse.layout import (
     Layer,
@@ -119,6 +121,7 @@ class StagedFile:
     details: dict[str, str]
     """The details of the manifest record at the time the file was staged."""
     raw_sha256: str
+    """SHA-256 of the downloaded source file the raw file was made from."""
     staging_version: int
     staged_at: str
     """UTC timestamp of the staging. For a failure that keeps repeating, of the first one."""
@@ -133,6 +136,9 @@ class StagedFile:
     rule_warnings: dict[str, int] = field(default_factory=dict)
     error: str | None = None
     """Why the file as a whole could not be staged."""
+    raw_file_sha256: str | None = None
+    """SHA-256 of the raw Parquet file that was staged. A raw file rebuilt from
+    the landing zone keeps its source hash but not this one."""
 
     @property
     def outputs(self) -> list[str]:
@@ -190,6 +196,15 @@ class _RawFile:
     source: str
     raw_path: str
     context: FileContext
+    raw_file_sha256: str | None
+    """From the manifest. Records written before it existed have none."""
+
+    def current_raw_file_sha256(self, root: Path) -> str | None:
+        """The hash of the raw file as it is now; read from disk when the manifest lacks it."""
+        if self.raw_file_sha256 is not None:
+            return self.raw_file_sha256
+        raw_file = root / self.raw_path
+        return file_sha256(raw_file) if raw_file.is_file() else None
 
 
 def run(root: Path, *, now: Clock = utc_now, full_refresh: bool = False) -> list[StageOutcome]:
@@ -226,7 +241,7 @@ def _raw_files(manifest: Manifest) -> list[_RawFile]:
                 collected_at=datetime.fromisoformat(record.collected_at),
                 details=record.details,
             )
-            files.append(_RawFile(record.source, record.raw_path, context))
+            files.append(_RawFile(record.source, record.raw_path, context, record.raw_file_sha256))
     return files
 
 
@@ -260,6 +275,7 @@ def _up_to_date(root: Path, file: _RawFile, entry: StagedFile) -> bool:
     return (
         entry.error is None
         and entry.raw_sha256 == file.context.source_sha256
+        and entry.raw_file_sha256 == file.current_raw_file_sha256(root)
         and entry.staging_version == STAGING_VERSION
         and all((root / path).is_file() for path in entry.outputs)
     )
@@ -272,6 +288,7 @@ def _stage(root: Path, file: _RawFile, now: Clock) -> StagedFile:
         raise _RawFileMissingError(
             f"raw file is missing: {file.raw_path}; run the collection again"
         )
+    raw_file_sha256 = file_sha256(raw_file)  # of the bytes staged, whatever the manifest says
     raw = pd.read_parquet(raw_file)
     stager = STAGERS[file.source]()
     frames = stager.stage(raw, file.context, now=now)
@@ -293,6 +310,7 @@ def _stage(root: Path, file: _RawFile, now: Clock) -> StagedFile:
         rows_quarantined=rows_quarantined,
         rule_failures=frames.error_counts,
         rule_warnings=frames.warning_counts,
+        raw_file_sha256=raw_file_sha256,
     )
 
 

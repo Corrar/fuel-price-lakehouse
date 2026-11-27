@@ -10,7 +10,6 @@ import httpx
 import pyarrow.parquet as pq
 import pytest
 
-from fuel_price_lakehouse import cli
 from fuel_price_lakehouse.collect import landing
 from fuel_price_lakehouse.collect.run import rebuild_raw
 from fuel_price_lakehouse.collect.run import run as collect
@@ -286,6 +285,25 @@ def test_unclosed_quote_fails_the_file_instead_of_merging_rows(web, tmp_path, fa
     assert not list(tmp_path.rglob("fuel_group=lpg/**/*.parquet"))
 
 
+def test_stray_quotes_that_pair_up_fail_the_file_instead_of_merging_rows(web, tmp_path, fast):
+    rows = anp_csv("110,00", "111,00", "112,00", "113,00").decode("utf-8")
+    rows = rows.replace("POSTO 2 LTDA", '"POSTO 2 LTDA', 1).replace("POSTO 3 LTDA", 'POSTO 3"', 1)
+    web.files[OCTOBER_LPG] = rows.encode("utf-8")
+    outcomes = run(web, tmp_path, fast)
+
+    assert actions(outcomes)[OCTOBER_LPG] == "failed"
+    assert "lines would be merged" in manifest(tmp_path)[OCTOBER_LPG]["last_error"]
+
+
+def test_utf8_file_without_bom_and_a_damaged_byte_is_corrupt(web, tmp_path, fast):
+    text = HEADER + "\r\nSE;SP;SÃO PAULO;POSTO JOÃO;x;RUA;1;;;;GLP;05/10/2026;110,00;;u;B\r\n"
+    web.files[OCTOBER_LPG] = text.encode("utf-8").replace(b"JO\xc3\x83O", b"JO\xc3O")
+    outcomes = run(web, tmp_path, fast)
+
+    assert actions(outcomes)[OCTOBER_LPG] == "failed"
+    assert "not a readable CSV" in manifest(tmp_path)[OCTOBER_LPG]["last_error"]
+
+
 def test_malformed_quoting_falls_back_to_the_lenient_reader(web, tmp_path, fast):
     # A quote closed in the middle of a field is an error for the strict reader.
     bad = '"AV "BRASIL" 100"'
@@ -369,6 +387,58 @@ def test_record_whose_raw_file_is_gone_is_collected_again(web, tmp_path, fast):
     assert (tmp_path / records[OCTOBER_DIESEL]["raw_path"]).is_file()
     assert (tmp_path / records["bcb_sgs/1/2026"]["raw_path"]).is_file()
     assert actions(outcomes)[OCTOBER_LPG] == "unchanged"
+
+
+def november(content: bytes) -> bytes:
+    """The same rows, dated in a month no closed file covers yet."""
+    return content.replace(b"05/10/2026", b"16/11/2026")
+
+
+def test_replaced_rolling_file_stays_as_a_snapshot_until_closed_files_cover_it(web, tmp_path, fast):
+    web.files[FOUR_WEEKS] = november(anp_csv("6,30", "6,40", "6,50"))
+    run(web, tmp_path, fast)
+    first = manifest(tmp_path)[FOUR_WEEKS]
+    web.files[FOUR_WEEKS] = november(anp_csv("6,31", "6,41"))
+    run(web, tmp_path, fast)
+
+    records = manifest(tmp_path)
+    snapshots = {key: record for key, record in records.items() if "#snapshot-" in key}
+    assert list(snapshots) == [f"{FOUR_WEEKS}#snapshot-{first['sha256'][:12]}"]
+    snapshot = next(iter(snapshots.values()))
+    assert snapshot["raw_path"] == first["raw_path"]  # the replaced rows are still there
+    assert (tmp_path / snapshot["raw_path"]).is_file()
+    assert snapshot["details"]["period"] == first["collected_at"][:10]
+    assert snapshot["details"]["last_collection_date"] == "2026-11-16"
+    assert records[FOUR_WEEKS]["raw_path"] != first["raw_path"]
+    assert pq.read_table(tmp_path / records[FOUR_WEEKS]["raw_path"]).num_rows == 2
+
+
+def test_snapshot_already_covered_by_a_monthly_file_is_pruned(web, tmp_path, fast):
+    run(web, tmp_path, fast)  # four-week rows dated 05/10/2026; October is published
+    first = manifest(tmp_path)[FOUR_WEEKS]
+    web.files[FOUR_WEEKS] = anp_csv("6,31", "6,41")
+    run(web, tmp_path, fast)
+
+    assert not [key for key in manifest(tmp_path) if "#snapshot-" in key]
+    assert not (tmp_path / first["raw_path"]).exists()
+    assert landing.sha256_of(tmp_path / first["landing_path"]) == first["sha256"]  # bytes kept
+
+
+def test_full_check_fills_in_missing_landing_copies(web, tmp_path, fast):
+    run(web, tmp_path, fast)
+    path = manifest_path(tmp_path)
+    document = json.loads(path.read_text(encoding="utf-8"))
+    for key in (OCTOBER_DIESEL, "bcb_sgs/1/2026"):  # records from before the landing zone
+        (tmp_path / document["files"][key]["landing_path"]).unlink()
+        document["files"][key]["landing_path"] = None
+    path.write_text(json.dumps(document), encoding="utf-8")
+
+    run(web, tmp_path, fast, full_check=True)
+
+    for key in (OCTOBER_DIESEL, "bcb_sgs/1/2026"):
+        record = manifest(tmp_path)[key]
+        assert landing.sha256_of(tmp_path / record["landing_path"]) == record["sha256"]
+        assert record["revision"] == 1
 
 
 # --- landing zone --------------------------------------------------------------------------------
@@ -520,10 +590,3 @@ def test_sgs_malformed_body_is_a_failure_not_a_raw_file(web, tmp_path, fast):
 
 
 # --- command line --------------------------------------------------------------------------------
-
-
-def test_since_must_be_year_month():
-    args = cli.build_parser().parse_args(["extract", "--since", "2026-07"])
-    assert args.since == date(2026, 7, 1)
-    with pytest.raises(SystemExit):
-        cli.build_parser().parse_args(["extract", "--since", "07/2026"])

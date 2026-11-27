@@ -1,9 +1,10 @@
 """Documents generated from the code, so they cannot drift from what runs.
 
 Each function renders one Markdown document from the objects the pipeline
-uses. The rendered files are committed under ``docs/``, and a test fails when
-a committed file differs from what the code renders now: change a rule, run
-``make docs``, commit both.
+uses: the validation rules and the table registry. The rendered files are
+committed under ``docs/``, and a test fails when a committed file differs from
+what the code renders now: change a rule or a table, run ``make docs``, commit
+both.
 """
 
 from __future__ import annotations
@@ -59,7 +60,42 @@ def _rules_table(rules: Sequence[Rule]) -> list[str]:
     return rows
 
 
-DOCUMENTS = {"docs/quality-rules.md": quality_rules}
+def data_dictionary() -> str:
+    """Every curated table: what a row is, its key, whether it is published, and its columns."""
+    from fuel_price_lakehouse.curate.tables import TABLES
+
+    lines = [
+        GENERATED_NOTE,
+        "",
+        "# Data dictionary",
+        "",
+        "The curated tables, rebuilt from the staged layer on every run. Public tables",
+        "are published on the dashboard and as downloads; the others contain",
+        "station-level data and stay where the pipeline runs",
+        "([ADR 0002](decisions/0002-what-is-published.md)).",
+        "",
+        "| Table | Published | Key |",
+        "| --- | --- | --- |",
+    ]
+    lines += [
+        f"| [`{table.name}`](#{table.name}) | {'yes' if table.public else 'no'} "
+        f"| {', '.join(f'`{column}`' for column in table.key)} |"
+        for table in TABLES
+    ]
+    for table in TABLES:
+        lines += ["", f"## {table.name}", "", table.description, ""]
+        lines += [f"File: `curated/{table.path}`.", ""]
+        lines += ["| Column | Type | Null | Description |", "| --- | --- | --- | --- |"]
+        for column in table.columns:
+            values = f" One of: {', '.join(column.allowed)}." if column.allowed else ""
+            nullable = "yes" if column.nullable else ""
+            lines.append(
+                f"| `{column.name}` | {column.type} | {nullable} | {column.description}.{values} |"
+            )
+    return "\n".join(lines) + "\n"
+
+
+DOCUMENTS = {"docs/quality-rules.md": quality_rules, "docs/data-dictionary.md": data_dictionary}
 """Every generated document, by its path relative to the repository root."""
 
 

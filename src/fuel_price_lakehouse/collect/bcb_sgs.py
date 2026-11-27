@@ -25,7 +25,12 @@ import httpx
 from fuel_price_lakehouse.collect import landing
 from fuel_price_lakehouse.collect.http import Fetcher, SourceError, TransientError
 from fuel_price_lakehouse.collect.manifest import FileRecord, Manifest, Outcome
-from fuel_price_lakehouse.collect.raw import CorruptFileError, Provenance, write_json_records
+from fuel_price_lakehouse.collect.raw import (
+    CorruptFileError,
+    Provenance,
+    file_sha256,
+    write_json_records,
+)
 from fuel_price_lakehouse.config import Clock
 from fuel_price_lakehouse.layout import Layer, Source, partition_dir
 
@@ -185,6 +190,10 @@ def _collect_window(
     new_etag = response.headers.get("ETag", "")
     if previous is not None and previous.sha256 == sha256:
         previous.details["etag"] = new_etag
+        if previous.landing_path is None and response.status_code == 200:
+            # A record from before the landing zone: keep the bytes now that we have them.
+            backfilled = landing.store_bytes(body, sha256, Source.BCB_SGS, root)
+            previous.landing_path = backfilled.relative_to(root).as_posix()
         return Outcome(window.key, "unchanged", len(body), detail="same hash")
     if response.status_code == 404 and previous is not None and previous.rows:
         raise SourceError(f"{window.url}: had {previous.rows} rows, now reports no data")
@@ -212,6 +221,7 @@ def _collect_window(
             rows=rows,
             raw_path=destination.relative_to(root).as_posix() if rows else None,
             landing_path=landed.relative_to(root).as_posix() if landed else None,
+            raw_file_sha256=file_sha256(destination) if rows else None,
             revision=(record.revision if record else 0) + 1,
             details={"series": str(window.code), "year": str(window.start.year), "etag": new_etag},
             superseded=previous.history_with_current() if previous is not None else [],

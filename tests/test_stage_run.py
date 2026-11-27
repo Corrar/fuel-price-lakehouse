@@ -160,6 +160,7 @@ def test_state_records_what_staging_made_of_a_file(web, tmp_path, fast):
         },
         "rule_warnings": {"observed_on_not_in_future": 0},
         "error": None,
+        "raw_file_sha256": record["raw_file_sha256"],
     }
     assert json.loads(staging_state_path(tmp_path).read_text(encoding="utf-8"))["version"] == 1
     assert outcomes[DOLLAR] == driver.StageOutcome(
@@ -382,6 +383,7 @@ def test_schema_drift_fails_one_file_and_the_run_goes_on(web, tmp_path, fast, fa
         "rule_failures": {},
         "rule_warnings": {},
         "error": outcomes[IPCA].detail,
+        "raw_file_sha256": None,
     }
     assert not (tmp_path / IPCA_STAGED).exists()
     assert not (tmp_path / IPCA_QUARANTINE).exists()
@@ -610,3 +612,22 @@ def test_real_stagers_write_their_published_tables_through_the_driver(web, tmp_p
     assert quarantine.equals(anp.QUARANTINE_ARROW_SCHEMA)
     assert sum(entry["rows_read"] for entry in entries.values()) == 11
     assert set(actions(stage(tmp_path)).values()) == {"unchanged"}
+
+
+def test_raw_file_rebuilt_from_landing_is_staged_again(web, tmp_path, fast):
+    from fuel_price_lakehouse.collect.run import rebuild_raw
+
+    collect_raw(web, tmp_path, fast)
+    stage(tmp_path)
+    staged = "staged/bcb_sgs/series/series=1/year=2026/data.parquet"
+    raw_file = tmp_path / manifest(tmp_path)[DOLLAR]["raw_path"]
+    # The raw copy goes wrong (an older reader, a manual edit) and staging follows it...
+    pq.write_table(pq.read_table(raw_file).slice(0, 1), raw_file)
+    stage(tmp_path, full_refresh=True)
+    assert len(rows(tmp_path, staged)) == 1
+
+    rebuild_raw(tmp_path)  # ...then the raw file is rebuilt from the landed bytes
+    outcomes = stage(tmp_path)
+
+    assert actions(outcomes)[DOLLAR] == "staged"
+    assert len(rows(tmp_path, staged)) == 2
